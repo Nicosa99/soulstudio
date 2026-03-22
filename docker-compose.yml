@@ -1,0 +1,15 @@
+services:
+  studio:
+    build: .
+    container_name: soulstudio_app_1
+    restart: always
+    env_file:
+      - .env.local
+    ports:
+      - "3002:3002"
+    networks:
+      - soultune_default
+
+networks:
+  soultune_default:
+    external: true
