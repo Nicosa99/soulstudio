@@ -57,3 +57,32 @@ No standard pan nodes for binaural channel routing
 No pure sine waves for carrier/drone frequencies
 No placeholder code comments in generated output
 No generic light-mode UI or rounded, playful SaaS aesthetics
+
+---
+
+## DEPLOYMENT & DEV WORKFLOW (Docker)
+
+### 1. Local Development (with Hot-Reload)
+Uses `Dockerfile.dev` and `docker-compose.dev.yml` with file-system polling for stable HMR in containerized environments.
+```bash
+# Start dev environment
+docker-compose -f docker-compose.dev.yml up -d --build
+
+# Force dependency refresh (e.g. after adding npm packages)
+docker-compose -f docker-compose.dev.yml build --no-cache studio-dev
+docker-compose -f docker-compose.dev.yml up -d
+```
+
+### 2. Production Build (Optimized)
+Uses the multi-stage `Dockerfile` and `docker-compose.yml`.
+```bash
+# Build and run production
+docker-compose up -d --build
+
+# Stop and remove production container
+docker-compose down
+```
+
+### 3. Ports
+- **DAW Studio:** `http://localhost:3002` (Mapped from internal 3002)
+- **Production URL:** `https://studio.soultune.app` (Proxied via Nginx to port 3002)

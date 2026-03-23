@@ -4,109 +4,121 @@ import { useEffect, useRef, useState } from "react";
 
 interface WaveformCanvasProps {
   fileUrl: string;
-  colorHex: string;
-  trimStart: number;
-  duration: number;
+  color: string;
+  width: number;
+  height: number;
 }
 
-// Global cache
-const cache = new Map<string, { peaks: number[], durationSecs: number }>();
-
-export function WaveformCanvas({ fileUrl, colorHex, trimStart, duration }: WaveformCanvasProps) {
+export function WaveformCanvas({ fileUrl, color, width, height }: WaveformCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [audioData, setAudioData] = useState<{ peaks: number[], durationSecs: number } | null>(cache.get(fileUrl) || null);
+  const [peaks, setPeaks] = useState<number[] | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    if (cache.has(fileUrl)) return;
+    if (!fileUrl || fileUrl === "" || fileUrl.startsWith('http://fake')) {
+      setPeaks(null);
+      return;
+    }
 
     let isMounted = true;
-    const fetchAndDecode = async () => {
+    setIsLoading(true);
+
+    async function loadAndProcessAudio() {
+      let audioCtx: AudioContext | null = null;
       try {
-        const res = await fetch(fileUrl);
-        const arrayBuffer = await res.arrayBuffer();
-        const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
-        const ctx = new AudioCtor();
-        const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+        const response = await fetch(fileUrl);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         
-        const rawData = audioBuffer.getChannelData(0);
-        // High density sampling
-        const samples = 3000;
-        const blockSize = Math.floor(rawData.length / samples);
-        const newPeaks = [];
-
-        for (let i = 0; i < samples; i++) {
-          let max = 0;
-          const start = i * blockSize;
-          for (let j = 0; j < blockSize; j++) {
-            const val = Math.abs(rawData[start + j]);
-            if (val > max) max = val;
+        const arrayBuffer = await response.arrayBuffer();
+        
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        audioCtx = new AudioContextClass();
+        
+        // FAIL-SAFE DECODING
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer).catch(err => {
+          console.warn("Decoding failed for:", fileUrl, err);
+          return null;
+        });
+        
+        if (!isMounted || !audioBuffer) {
+          if (isMounted) {
+            setPeaks(null);
+            setIsLoading(false);
           }
-          newPeaks.push(max);
+          return;
         }
 
-        const data = { peaks: newPeaks, durationSecs: audioBuffer.duration };
-        
-        if (isMounted) {
-          cache.set(fileUrl, data);
-          setAudioData(data);
+        const channelData = audioBuffer.getChannelData(0);
+        const sampleCount = Math.min(Math.floor(width / 2), 1000); 
+        const step = Math.floor(channelData.length / sampleCount);
+        const result = [];
+
+        for (let i = 0; i < sampleCount; i++) {
+          let max = 0;
+          for (let j = 0; j < step; j++) {
+            const datum = Math.abs(channelData[i * step + j]);
+            if (datum > max) max = datum;
+          }
+          result.push(max);
         }
+
+        setPeaks(result);
+        setIsLoading(false);
       } catch (err) {
-        console.error("Failed to decode waveform", err);
+        console.warn("Waveform processing failed (Safe Catch):", fileUrl);
+        if (isMounted) {
+          setPeaks(null);
+          setIsLoading(false);
+        }
+      } finally {
+        if (audioCtx) audioCtx.close();
       }
-    };
+    }
 
-    fetchAndDecode();
+    loadAndProcessAudio();
     return () => { isMounted = false; };
-  }, [fileUrl]);
+  }, [fileUrl, width]);
 
   useEffect(() => {
+    if (!canvasRef.current) return;
     const canvas = canvasRef.current;
-    if (!canvas || !audioData) return;
-    
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    if (rect.width === 0) return;
-    
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    ctx.scale(dpr, dpr);
-
-    const width = rect.width;
-    const height = rect.height;
-    
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = colorHex;
     
-    const centerY = height / 2;
-    
-    // Calculate the array slice bounds for the current visible frame
-    const { peaks, durationSecs } = audioData;
-    const peakFramesPerSec = peaks.length / durationSecs;
-    const startIndex = Math.floor(trimStart * peakFramesPerSec);
-    const endIndex = Math.min(peaks.length, Math.floor((trimStart + duration) * peakFramesPerSec));
-    const renderPeaks = peaks.slice(startIndex, endIndex);
-
-    if (renderPeaks.length === 0) return;
-
-    const step = width / renderPeaks.length;
-    
-    ctx.beginPath();
-    for (let i = 0; i < renderPeaks.length; i++) {
-       const x = i * step;
-       const peakHeight = Math.max(1, (renderPeaks[i] * height) / 2); 
-       
-       ctx.globalAlpha = 0.5;
-       ctx.fillRect(x, centerY - peakHeight, Math.max(0.5, step - 0.2), peakHeight * 2);
+    // If no peaks (error or empty), draw a subtle flat baseline
+    if (!peaks || peaks.length === 0) {
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.2;
+      ctx.beginPath();
+      ctx.moveTo(0, height / 2);
+      ctx.lineTo(width, height / 2);
+      ctx.stroke();
+      return;
     }
-  }, [audioData, colorHex, trimStart, duration]);
+
+    const barWidth = width / peaks.length;
+    const centerY = height / 2;
+
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.8;
+
+    peaks.forEach((peak, i) => {
+      const x = i * barWidth;
+      const barHeight = Math.max(1, peak * height * 0.9);
+      const y = centerY - barHeight / 2;
+      ctx.fillRect(x, y, Math.max(1, barWidth - 0.5), barHeight);
+    });
+  }, [peaks, width, height, color]);
 
   return (
     <canvas 
-      ref={canvasRef}
-      className="absolute inset-x-0 bottom-0 top-0 h-full w-full pointer-events-none mix-blend-screen opacity-60 z-10"
+      ref={canvasRef} 
+      width={width} 
+      height={height} 
+      className="absolute inset-0 pointer-events-none z-0"
+      style={{ opacity: isLoading ? 0.2 : 1 }}
     />
   );
 }

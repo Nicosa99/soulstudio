@@ -9,7 +9,7 @@ interface AutoSaveManagerProps {
 }
 
 export function AutoSaveManager({ projectId }: AutoSaveManagerProps) {
-  const { tracks, blocks, saveStatus, setSaveStatus } = useStudioStore();
+  const { projectName, tracks, blocks, saveStatus, setSaveStatus } = useStudioStore();
   const supabase = createClient();
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -28,8 +28,8 @@ export function AutoSaveManager({ projectId }: AutoSaveManagerProps) {
         const { error } = await supabase
           .from("projects")
           .update({
+            name: projectName,
             state_json: { tracks, blocks },
-            // Optional: update name if it changed
           })
           .eq("id", projectId);
 
@@ -44,7 +44,7 @@ export function AutoSaveManager({ projectId }: AutoSaveManagerProps) {
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
-  }, [tracks, blocks, saveStatus, projectId, setSaveStatus, supabase]);
+  }, [projectName, tracks, blocks, saveStatus, projectId, setSaveStatus, supabase]);
 
   return null; // Invisible component
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Cloud, CheckCircle2, Loader2, AlertCircle, Magnet, ZoomIn } from "lucide-react";
+import { Download, Cloud, CheckCircle2, Loader2, AlertCircle, Magnet, ZoomIn, Mic, Square } from "lucide-react";
 import { PlayerControls } from "./PlayerControls";
 import { GlobalSettingsLCD } from "./GlobalSettingsLCD";
 import { MasterVisualizer } from "./MasterVisualizer";
@@ -9,16 +9,106 @@ import { useStudioStore } from "@/store/useStudioStore";
 import { instance as AudioEngine } from "@/lib/audio/AudioEngine";
 import { ExportEngine } from "@/lib/audio/ExportEngine";
 import { ProjectEngine } from "@/lib/audio/ProjectEngine";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { createClient } from "@/utils/supabase/client";
 
 export function TopBar() {
-  const { blocks, masterTuning, saveStatus, zoomLevel, setZoomLevel, isSnapEnabled, setSnapEnabled, isExporting } = useStudioStore();
+  const { 
+    projectName,
+    setProjectName,
+    blocks, 
+    masterTuning, 
+    saveStatus, 
+    zoomLevel, 
+    setZoomLevel, 
+    isSnapEnabled, 
+    setSnapEnabled, 
+    isExporting,
+    isRecording,
+    toggleRecording,
+    currentTime,
+    subscriptionStatus,
+    addBlock
+  } = useStudioStore();
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   
   const supabase = createClient();
+
+  // Recording Logic Refs
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordStartTimeRef = useRef<number>(0);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: { 
+          echoCancellation: false, 
+          noiseSuppression: false, 
+          autoGainControl: false 
+        } 
+      });
+
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+      recordStartTimeRef.current = currentTime;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+        const audioUrl = URL.createObjectURL(audioBlob);
+        
+        // Get duration
+        const tempAudio = new Audio(audioUrl);
+        tempAudio.addEventListener('loadedmetadata', () => {
+          const duration = tempAudio.duration;
+          
+          addBlock({
+            track_id: 'track-guide', // The Guide
+            asset_id: `rec-${Date.now()}`,
+            label: "Voice Recording",
+            type: 'voice',
+            start_time: recordStartTimeRef.current,
+            end_time: recordStartTimeRef.current + duration,
+            properties: { volume: 80, fileUrl: audioUrl }
+          });
+        });
+
+        // Stop all tracks in stream
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+    } catch (err) {
+      console.error("Recording failed", err);
+      alert("Microphone access denied or failed.");
+      toggleRecording(); // reset state
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+  };
+
+  // Sync isRecording state with actual Engine
+  useEffect(() => {
+    if (isRecording) {
+      startRecording();
+    } else {
+      stopRecording();
+    }
+  }, [isRecording]);
 
   const handleSaveSoultune = async () => {
      try {
@@ -40,65 +130,74 @@ export function TopBar() {
   };
 
   const handleExport = async () => {
-    if (useStudioStore.getState().isExporting) return;
-    
-    // Subscrption Gating Check
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data: profile } = await supabase
-        .from('users')
-        .select('subscription_status')
-        .eq('id', user.id)
-        .single();
-        
-      if (!profile || profile.subscription_status !== 'active') {
-         setShowUpgradeModal(true);
-         return;
-      }
-    } else {
-       setShowUpgradeModal(true); // Gating guests implicitly
+    if (isExporting) return;
+    if (subscriptionStatus !== 'active') {
+       setShowUpgradeModal(true);
        return;
     }
 
     try {
-      const blob = await ExportEngine.renderMixdown(useStudioStore.getState().getComputedBlocks(), masterTuning);
+      const computedBlocks = useStudioStore.getState().blocks;
+      const blob = await ExportEngine.renderMixdown(computedBlocks, masterTuning);
       if (blob.size === 0) {
-        alert("Timeline is empty or all tracks are muted! Add or unmute blocks to export.");
+        alert("Timeline is empty! Add blocks to export.");
         return;
       }
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.style.display = "none";
       a.href = url;
-      a.download = `SoulStudio_Mixdown_${Date.now()}.wav`;
+      a.download = `${projectName.replace(/\s+/g, '_')}_${Date.now()}.wav`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
     } catch(err) {
       console.error("Export Failed", err);
-      alert("Failed to render Mixdown. See console for details.");
+      alert("Failed to render Mixdown.");
     }
   };
 
   return (
     <>
-    <header className="flex h-12 w-full items-center justify-between border-b border-border bg-panel px-4 shadow-[0_1px_15px_var(--color-border-glow)] z-50 relative">
+    <header className="flex h-12 w-full items-center justify-between border-b border-border bg-panel px-4 shadow-[0_1px_15px_var(--color-border-glow)] z-50 relative text-white">
       <div className="flex items-center gap-2">
         <div className="flex h-6 w-6 items-center justify-center rounded-sm bg-cyan-dim text-cyan shadow-[0_0_10px_var(--color-border-glow)]">
           <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="2">
             <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
           </svg>
         </div>
-        <span className="text-sm font-semibold tracking-wider text-text">SOUL<span className="text-cyan">STUDIO</span></span>
+        
+        {/* Step 1: Editable Project Name */}
+        <input 
+          value={projectName}
+          onChange={(e) => setProjectName(e.target.value)}
+          className="bg-transparent border-none text-white/80 hover:text-white focus:outline-none focus:ring-1 focus:ring-[#00F0FF] rounded px-2 text-sm font-semibold tracking-wider w-48 transition-all"
+          placeholder="Untitled Journey"
+        />
         
         <GlobalSettingsLCD />
       </div>
 
-      <PlayerControls />
+      <div className="flex items-center gap-4">
+        <PlayerControls />
+        
+        {/* Step 4: Record Button */}
+        <button
+          onClick={toggleRecording}
+          className={`group flex h-8 w-8 items-center justify-center rounded-full transition-all duration-300
+            ${isRecording 
+              ? 'bg-red-500 animate-pulse drop-shadow-[0_0_15px_rgba(239,68,68,1)]' 
+              : 'bg-white/5 hover:bg-white/10 text-red-500/70 hover:text-red-500'
+            }`}
+          title={isRecording ? "Stop Recording" : "Start Recording"}
+        >
+          {isRecording ? <Square size={14} className="fill-white text-white" /> : <Mic size={16} />}
+        </button>
+      </div>
+
       <MasterVisualizer />
 
       <div className="flex items-center gap-4 text-text-muted">
-        {/* Zoom & Snap */}
         <div className="flex items-center gap-3 border-r border-border pr-4 mr-2">
            <button 
              onClick={() => setSnapEnabled(!isSnapEnabled)}
@@ -119,22 +218,20 @@ export function TopBar() {
            </div>
         </div>
 
-        {/* Sync Status */}
         <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest hidden md:flex">
-           {saveStatus === 'saved' && <><CheckCircle2 size={14} className="text-cyan" /><span className="text-cyan">Saved to Cloud</span></>}
-           {saveStatus === 'saving' && <><Loader2 size={14} className="text-cyan animate-spin" /><span className="text-cyan">Saving...</span></>}
-           {saveStatus === 'unsaved' && <><Cloud size={14} className="text-text-muted" /><span>Unsaved</span></>}
+           {saveStatus === 'saved' && <><CheckCircle2 size={14} className="text-cyan" /><span className="text-cyan">Cloud Sync: OK</span></>}
+           {saveStatus === 'saving' && <><Loader2 size={14} className="text-cyan animate-spin" /><span className="text-cyan">Uploading...</span></>}
+           {saveStatus === 'unsaved' && <><Cloud size={14} className="text-text-muted" /><span>Unsaved Changes</span></>}
            {saveStatus === 'error' && <><AlertCircle size={14} className="text-red-500" /><span className="text-red-500">Sync Error</span></>}
         </div>
 
-        {/* Project Functions */}
         <div className="flex items-center gap-2 border-r border-border pr-4 mr-2">
             <input type="file" accept=".soultune" ref={fileInputRef} className="hidden" onChange={handleImportSoultune} />
             <button 
               onClick={() => fileInputRef.current?.click()} 
               className="flex h-7 px-3 items-center justify-center rounded-sm font-bold text-[9px] tracking-wider uppercase bg-panel border border-border text-text hover:bg-white/10 transition-colors"
             >
-              LOAD PROJECT
+              LOAD
             </button>
             <button 
               onClick={handleSaveSoultune} 
@@ -144,17 +241,18 @@ export function TopBar() {
             </button>
         </div>
 
-        {/* Export Button */}
         <button 
           onClick={handleExport}
           disabled={isExporting}
           className={`flex h-8 px-4 items-center justify-center gap-2 rounded-md font-bold text-[10px] tracking-wider uppercase transition-all
             ${isExporting 
                ? 'bg-border text-text-muted cursor-not-allowed' 
-               : 'bg-cyan text-bg hover:bg-white hover:shadow-[0_0_15px_rgba(0,240,255,0.4)]'
+               : 'bg-cyan text-[#05080F] hover:bg-white hover:shadow-[0_0_15px_rgba(0,240,255,0.4)]'
             }`}
         >
-          <span className="bg-[#05080F] text-cyan px-1.5 py-0.5 rounded text-[8px] font-black tracking-widest uppercase shadow-[0_0_5px_rgba(0,240,255,0.2)]">PRO</span>
+          {subscriptionStatus !== 'active' && (
+            <span className="bg-[#05080F] text-cyan px-1.5 py-0.5 rounded text-[8px] font-black tracking-widest uppercase shadow-[0_0_5px_rgba(0,240,255,0.2)]">PRO</span>
+          )}
           {isExporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
           {isExporting ? "RENDERING..." : "EXPORT .WAV"}
         </button>
@@ -167,8 +265,8 @@ export function TopBar() {
            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-cyan/10 mb-6 drop-shadow-[0_0_15px_rgba(0,240,255,0.5)]">
              <span className="text-2xl font-black text-white px-2 tracking-widest">PRO</span>
            </div>
-           <h2 className="text-2xl font-bold text-white tracking-wide mb-3">Upgrade Required</h2>
-           <p className="text-text-muted text-sm mb-8 leading-relaxed">
+           <h2 className="text-2xl font-bold text-white tracking-wide mb-3 text-white">Upgrade Required</h2>
+           <p className="text-text-muted text-sm mb-8 leading-relaxed text-slate-400">
              Studio Quality Export requires Creator Pro. Upgrade now to download your neuro-acoustic tracks with full commercial rights.
            </p>
            <button
@@ -180,7 +278,7 @@ export function TopBar() {
                   if (data.url) {
                     window.location.href = data.url;
                   } else {
-                    alert("Checkout Configuration Missing. Please run standard Stripe Env integrations.");
+                    alert(data.error || "Checkout Configuration Missing.");
                   }
                 } catch (e) {
                   alert("Checkout routing failed.");
@@ -189,7 +287,7 @@ export function TopBar() {
                 }
              }}
              disabled={isCheckingOut}
-             className="w-full h-12 rounded-md bg-cyan text-bg font-bold tracking-widest uppercase hover:bg-white transition-all shadow-[0_0_15px_rgba(0,240,255,0.3)] mb-4 flex items-center justify-center gap-2"
+             className="w-full h-12 rounded-md bg-cyan text-[#05080F] font-bold tracking-widest uppercase hover:bg-white transition-all shadow-[0_0_15px_rgba(0,240,255,0.3)] mb-4 flex items-center justify-center gap-2"
            >
              {isCheckingOut ? <Loader2 size={18} className="animate-spin" /> : null}
              {isCheckingOut ? 'ROUTING TO STRIPE...' : 'Upgrade Now ($49/mo)'}

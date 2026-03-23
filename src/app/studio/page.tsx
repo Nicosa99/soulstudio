@@ -1,6 +1,5 @@
 import { createClient } from "@/utils/supabase/server";
 import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
 import Link from "next/link";
 import { 
   Plus, 
@@ -10,7 +9,10 @@ import {
   Activity, 
   LogOut, 
   User,
-  Clock
+  Clock,
+  CreditCard,
+  Zap,
+  Loader2
 } from "lucide-react";
 
 export default async function DashboardPage() {
@@ -21,28 +23,20 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
-  // Fetch projects from Supabase
-  const { data: projects, error } = await supabase
-    .from("projects")
-    .select("*")
-    .order("created_at", { ascending: false });
+  // Fetch projects and subscription in parallel
+  const [projectsRes, subRes] = await Promise.all([
+    supabase.from("projects").select("*").order("created_at", { ascending: false }),
+    supabase.from("subscriptions").select("status").eq("user_id", user.id).single()
+  ]);
+
+  const projects = projectsRes.data;
+  const subscriptionStatus = subRes.data?.status || 'free';
 
   async function signOut() {
     "use server";
     const supabase = await createClient();
     await supabase.auth.signOut();
     redirect("/login");
-  }
-
-  async function deleteProject(formData: FormData) {
-    "use server";
-    const projectId = formData.get("projectId") as string;
-    if (!projectId) return;
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    await supabase.from("projects").delete().eq("id", projectId).eq("user_id", user.id);
-    revalidatePath("/studio");
   }
 
   return (
@@ -69,13 +63,30 @@ export default async function DashboardPage() {
             <p className="text-slate-500 text-sm mt-1">Manage your neuro-acoustic creations.</p>
           </div>
           <div className="flex items-center gap-6">
+             {/* Subscription Badge */}
+             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-[10px] font-black uppercase tracking-tighter shadow-sm
+               ${subscriptionStatus === 'active' 
+                 ? 'bg-cyan/10 border-cyan/30 text-cyan shadow-cyan/10' 
+                 : 'bg-white/5 border-white/10 text-slate-400'}`}>
+               {subscriptionStatus === 'active' ? <Zap size={12} fill="currentColor" /> : null}
+               {subscriptionStatus === 'active' ? 'Creator Pro' : 'Free Tier'}
+             </div>
+
              <div className="flex items-center gap-3 bg-white/5 px-4 py-2 rounded-full border border-white/10">
                <div className="w-6 h-6 bg-purple-500/20 rounded-full flex items-center justify-center">
                  <User className="w-3.5 h-3.5 text-purple-400" />
                </div>
                <span className="text-xs font-medium text-slate-300">{user.email}</span>
              </div>
-             {/* New Project Form (using Server Actions or API routes is best, for now a simplified Link) */}
+
+             {subscriptionStatus === 'active' && (
+               <form action="/api/billing" method="POST">
+                 <button type="submit" className="p-2 hover:bg-white/5 rounded-full transition-colors text-slate-400 hover:text-white" title="Billing Portal">
+                   <CreditCard size={20} />
+                 </button>
+               </form>
+             )}
+
              <Link 
                href="/studio/new"
                className="bg-[#00F0FF] text-[#05080F] font-bold px-6 py-2.5 rounded-full hover:bg-white transition-all flex items-center gap-2 shadow-[0_0_20px_rgba(0,240,255,0.2)]"
@@ -91,16 +102,13 @@ export default async function DashboardPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {projects.map((project) => (
                 <div key={project.id} className="group relative bg-white/[0.03] border border-white/10 rounded-2xl p-6 hover:border-[#00F0FF]/40 hover:bg-white/[0.05] transition-all">
-                  <div className="flex justify-between items-start mb-12 relative z-20">
+                  <div className="flex justify-between items-start mb-12">
                     <div className="p-3 bg-white/5 rounded-xl">
                       <Activity className="w-6 h-6 text-slate-400 group-hover:text-[#00F0FF] transition-colors" />
                     </div>
-                    <form action={deleteProject}>
-                      <input type="hidden" name="projectId" value={project.id} />
-                      <button type="submit" className="opacity-0 group-hover:opacity-100 p-2 hover:bg-red-500/10 hover:text-red-400 rounded-lg transition-all">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </form>
+                    <button className="opacity-0 group-hover:opacity-100 p-2 hover:bg-red-500/10 hover:text-red-400 rounded-lg transition-all">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
                   
                   <h3 className="text-lg font-bold text-white mb-2 group-hover:text-[#00F0FF] transition-colors">{project.name || "Untitled Project"}</h3>

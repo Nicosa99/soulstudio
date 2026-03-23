@@ -1,5 +1,7 @@
+"use client";
+
 import { useDroppable } from "@dnd-kit/core";
-import { Activity, MoreHorizontal, Edit2, Trash2 } from "lucide-react";
+import { MoreHorizontal, Edit2, Trash2, Copy } from "lucide-react";
 import { Track, useStudioStore } from "@/store/useStudioStore";
 import { ReactNode, useState, useRef, useEffect } from "react";
 
@@ -9,9 +11,13 @@ interface TrackLaneProps {
 }
 
 export function TrackLane({ track, children }: TrackLaneProps) {
-  const { removeTrack, renameTrack, toggleMute, toggleSolo, setTrackVolume, setTrackPan } = useStudioStore();
+  const { removeTrack, duplicateTrack, renameTrack, toggleMute, toggleSolo, setTrackVolume, setTrackPan, getProjectDuration, zoomLevel } = useStudioStore();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const PxPerSec = 10 * zoomLevel;
+  const projectDuration = getProjectDuration();
+  const timelineWidth = projectDuration * PxPerSec;
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -43,30 +49,40 @@ export function TrackLane({ track, children }: TrackLaneProps) {
   return (
     <div className="flex h-24 w-max min-w-full border-b border-border bg-transparent group">
       
-      <div className="sticky left-0 top-0 bottom-0 w-[220px] bg-[#0A0F1A] border-r border-border p-3 flex flex-col justify-between z-20 shrink-0 shadow-[2px_0_10px_rgba(0,0,0,0.5)] transition-colors group-hover:bg-[#0E1524]">
+      <div
+        className="sticky left-0 top-0 bottom-0 w-[220px] bg-[#0A0F1A] border-r border-border p-3 flex flex-col justify-between z-20 shrink-0 shadow-[2px_0_10px_rgba(0,0,0,0.5)] transition-colors group-hover:bg-[#0E1524]"
+        onContextMenu={(e) => { e.preventDefault(); setIsMenuOpen(true); }}
+      >
          <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <div className={`w-3 h-3 rounded shadow-[0_0_5px_currentColor] border border-white/20 ${track.color.split(' ')[0]}`} />
               <h3 className="text-[11px] font-bold uppercase tracking-wide truncate text-white drop-shadow-md">{track.name}</h3>
             </div>
-            
+
             <div ref={menuRef} className="relative">
-              <button 
+              <button
                 onClick={() => setIsMenuOpen(!isMenuOpen)}
                 className="w-5 h-5 rounded hover:bg-white/10 flex items-center justify-center text-text-muted hover:text-white transition-colors"
               >
                 <MoreHorizontal size={12} />
               </button>
-              
+
               {isMenuOpen && (
-                <div className="absolute top-full right-0 mt-1 w-36 bg-panel border border-border shadow-2xl rounded-md z-50 py-1 overflow-hidden">
-                  <button 
+                <div className="absolute top-full right-0 mt-1 w-40 bg-panel border border-border shadow-2xl rounded-md z-50 py-1 overflow-hidden">
+                  <button
                     onClick={handleRename}
                     className="w-full text-left px-3 py-2 text-xs text-text hover:bg-cyan-dim/20 hover:text-cyan flex items-center gap-2 transition-colors"
                   >
                     <Edit2 size={12} /> Rename Track
                   </button>
-                  <button 
+                  <button
+                    onClick={() => { setIsMenuOpen(false); duplicateTrack(track.id); }}
+                    className="w-full text-left px-3 py-2 text-xs text-text hover:bg-violet/20 hover:text-violet-300 flex items-center gap-2 transition-colors"
+                  >
+                    <Copy size={12} /> Duplicate Track
+                  </button>
+                  <div className="h-px bg-border my-1" />
+                  <button
                     onClick={() => { setIsMenuOpen(false); removeTrack(track.id); }}
                     className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-red-500/20 hover:text-red-300 flex items-center gap-2 transition-colors"
                   >
@@ -121,18 +137,19 @@ export function TrackLane({ track, children }: TrackLaneProps) {
       {/* The Droppable Zone (Right Column) */}
       <div 
         ref={setNodeRef}
-        className={`relative flex-1 min-w-[2000px] bg-[linear-gradient(to_right,var(--color-border)_1px,transparent_1px)] bg-[size:100px_100%] transition-colors ${
+        className={`relative flex-1 bg-[linear-gradient(to_right,var(--color-border)_1px,transparent_1px)] transition-colors ${
           isOver ? 'bg-cyan-dim/10' : ''
         }`}
+        style={{ minWidth: `${timelineWidth}px`, backgroundSize: `${PxPerSec * 10}px 100%` }}
         onClick={(e) => {
           if (useStudioStore.getState().isRazorMode) {
              const rect = e.currentTarget.getBoundingClientRect();
              const clickX = e.clientX - rect.left;
-             const splitTime = clickX / 10;
+             const splitTime = clickX / PxPerSec;
              const blocks = useStudioStore.getState().blocks;
-             const blockToSplit = blocks.find(b => b.track_id === track.id && splitTime >= b.start_time && splitTime <= b.end_time);
+             const blockToSplit = blocks.find(b => b.track_id === track.id && (clickX / PxPerSec) >= b.start_time && (clickX / PxPerSec) <= b.end_time);
              if (blockToSplit) {
-               useStudioStore.getState().splitBlock(blockToSplit.id, splitTime);
+               useStudioStore.getState().splitBlock(blockToSplit.id, clickX / PxPerSec);
              }
           }
         }}

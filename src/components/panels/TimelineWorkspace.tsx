@@ -7,10 +7,14 @@ import { useEffect, useRef, useState } from "react";
 import { instance as AudioEngine } from "@/lib/audio/AudioEngine";
 
 export function TimelineWorkspace() {
-  const { tracks, blocks, isRazorMode, setRazorMode, isPlaying, currentTime, setCurrentTime, masterTuning, activeSelection, splitBlock, setActiveSelection, zoomLevel, isSnapEnabled } = useStudioStore();
+  const { tracks, blocks, isRazorMode, setRazorMode, isPlaying, currentTime, setCurrentTime, masterTuning, activeSelection, splitBlock, setActiveSelection, zoomLevel, isSnapEnabled, getProjectDuration } = useStudioStore();
   const timelineRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   
   const PxPerSec = 10 * zoomLevel;
+  const projectDuration = getProjectDuration();
+  const timelineWidth = projectDuration * PxPerSec;
+
   const [isSlicing, setIsSlicing] = useState(false);
   const [sliceX, setSliceX] = useState(0);
   const [sliceStartY, setSliceStartY] = useState(0);
@@ -43,19 +47,53 @@ export function TimelineWorkspace() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'c' || e.key === 'C') {
+      // CRITICAL SAFEGUARD: Skip shortcuts if user is typing
+      const activeTag = document.activeElement?.tagName;
+      const isInput = activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT';
+      const isMonaco = document.activeElement?.closest('.monaco-editor');
+      if (isInput || isMonaco) return;
+
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
+
+      // Undo: Ctrl + Z
+      if (cmdOrCtrl && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        (useStudioStore as any).temporal.getState().undo();
+      }
+
+      // Redo: Ctrl + Shift + Z or Ctrl + Y
+      if ((cmdOrCtrl && e.shiftKey && e.key.toLowerCase() === 'z') || (cmdOrCtrl && e.key.toLowerCase() === 'y')) {
+        e.preventDefault();
+        (useStudioStore as any).temporal.getState().redo();
+      }
+
+      // Copy: Ctrl + C
+      if (cmdOrCtrl && e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        useStudioStore.getState().copyBlock();
+      }
+
+      // Paste: Ctrl + V
+      if (cmdOrCtrl && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        useStudioStore.getState().pasteBlock();
+      }
+
+      // Razor Mode: C
+      if (!cmdOrCtrl && (e.key === 'c' || e.key === 'C')) {
         setRazorMode(true);
       }
+
+      // Delete
       if (e.key === 'Delete' || e.key === 'Backspace') {
-        const activeTag = document.activeElement?.tagName;
-        if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT') return;
-        
-        const selectedId = useStudioStore.getState().activeSelection;
-        if (selectedId) {
-          useStudioStore.getState().removeBlock(selectedId);
+        const { selectedBlocks, removeBlocks } = useStudioStore.getState();
+        if (selectedBlocks.length > 0) {
+          removeBlocks(selectedBlocks);
         }
       }
     };
+
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.key === 'c' || e.key === 'C') {
         setRazorMode(false);
@@ -71,16 +109,17 @@ export function TimelineWorkspace() {
   }, [setRazorMode]);
 
   useEffect(() => {
-    const el = timelineRef.current;
+    // Listener must be on the inner scroll container so preventDefault() fires
+    // before the browser handles the native scroll/zoom.
+    const el = scrollRef.current;
     if (!el) return;
-    
+
     const handleWheel = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
         const zoomDelta = e.deltaY > 0 ? -0.1 : 0.1;
         const currentZoom = useStudioStore.getState().zoomLevel;
-        let newZoom = currentZoom + zoomDelta;
-        newZoom = Math.max(0.1, Math.min(newZoom, 5.0));
+        const newZoom = Math.max(0.1, Math.min(currentZoom + zoomDelta, 5.0));
         useStudioStore.getState().setZoomLevel(newZoom);
       }
     };
@@ -97,6 +136,7 @@ export function TimelineWorkspace() {
   const handleTimelineClick = () => {
     if (!isRazorMode) {
       useStudioStore.getState().setActiveSelection(null);
+      useStudioStore.getState().setSelectedBlocks([]);
     }
   };
 
@@ -121,7 +161,7 @@ export function TimelineWorkspace() {
       ref={timelineRef}
       onClick={handleTimelineClick}
     >
-      <div className="flex-1 overflow-auto w-full relative">
+      <div ref={scrollRef} className="flex-1 overflow-auto w-full relative">
         {/* Time Ruler (Sticky Top) */}
         <div 
           className="sticky top-0 h-10 flex bg-panel border-b border-border z-30 w-max min-w-full cursor-text text-xs font-mono text-text-muted shadow-md"
@@ -135,8 +175,8 @@ export function TimelineWorkspace() {
 
            {/* Ruler Numbers */}
            <div 
-             className="relative flex-1 min-w-[2000px] flex items-center cursor-text hover:bg-black/30 transition-colors"
-             style={timelineBgStyle}
+             className="relative flex-1 flex items-center cursor-text hover:bg-black/30 transition-colors"
+             style={{ ...timelineBgStyle, minWidth: `${timelineWidth}px` }}
              onClick={handleRulerClick}
            >
              {/* Playhead Vertical Line */}
@@ -147,7 +187,7 @@ export function TimelineWorkspace() {
                 <div className="absolute -top-1 -left-1.5 w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[6px] border-t-cyan"></div>
              </div>
 
-             {Array.from({ length: 200 }).map((_, i) => {
+             {Array.from({ length: Math.ceil(projectDuration / 10) + 1 }).map((_, i) => {
                 const totalSecs = i * 10;
                 const mins = Math.floor(totalSecs / 60);
                 const secs = totalSecs % 60;
@@ -162,7 +202,7 @@ export function TimelineWorkspace() {
         </div>
 
         {/* Tracks Container */}
-        <div className="flex flex-col relative w-max min-w-full">
+        <div className="flex flex-col relative w-max" style={{ minWidth: `${timelineWidth + 220}px` }}>
            
            {/* Razor Overlay */}
            {isRazorMode && (

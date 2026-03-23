@@ -16,7 +16,7 @@ export default function StudioPage() {
   const params = useParams();
   const projectId = params.id as string;
   const router = useRouter();
-  const { addBlock, moveBlock, blocks, initializeProject, zoomLevel, isSnapEnabled } = useStudioStore();
+  const { addBlock, moveBlock, blocks, initializeProject, setSubscriptionStatus, zoomLevel, isSnapEnabled } = useStudioStore();
   
   const PxPerSec = 10 * zoomLevel;
   
@@ -28,30 +28,37 @@ export default function StudioPage() {
   const supabase = createClient();
 
   useEffect(() => {
-    async function loadProject() {
+    async function loadProjectAndSubscription() {
       try {
-        const { data: project, error } = await supabase
-          .from("projects")
-          .select("*")
-          .eq("id", projectId)
-          .single();
+        // Parallel fetch for project and subscription
+        const [projectRes, subRes] = await Promise.all([
+          supabase.from("projects").select("*").eq("id", projectId).single(),
+          supabase.from("subscriptions").select("status").single()
+        ]);
 
-        if (error) throw error;
-        if (!project) throw new Error("Project not found");
+        if (projectRes.error) throw projectRes.error;
+        if (!projectRes.data) throw new Error("Project not found");
+
+        // Set Subscription Status (fallback to 'free')
+        if (subRes.data) {
+          setSubscriptionStatus(subRes.data.status as any);
+        } else {
+          setSubscriptionStatus('free');
+        }
 
         // Initialize store with saved state
-        const state = project.state_json || { tracks: [], blocks: [] };
+        const state = projectRes.data.state_json || { tracks: [], blocks: [] };
         initializeProject(state);
       } catch (err: any) {
-        console.error("Error loading project:", err);
+        console.error("Error loading studio data:", err);
         setError(err.message);
       } finally {
         setLoading(false);
       }
     }
 
-    if (projectId) loadProject();
-  }, [projectId, initializeProject, supabase]);
+    if (projectId) loadProjectAndSubscription();
+  }, [projectId, initializeProject, setSubscriptionStatus, supabase]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
