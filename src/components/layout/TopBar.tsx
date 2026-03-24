@@ -28,7 +28,8 @@ export function TopBar() {
     toggleRecording,
     currentTime,
     subscriptionStatus,
-    addBlock
+    addBlock,
+    initializeProject
   } = useStudioStore();
   
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -121,10 +122,26 @@ export function TopBar() {
   const handleImportSoultune = async (e: React.ChangeEvent<HTMLInputElement>) => {
      const file = e.target.files?.[0];
      if (!file) return;
+     console.log("Loading file:", file.name, file.type);
      try {
-        await ProjectEngine.importSoultune(file);
+        let projectData: any;
+        
+        if (file.name.endsWith('.json')) {
+          const text = await file.text();
+          projectData = JSON.parse(text);
+          console.log("Importing raw JSON:", projectData);
+        } else {
+          projectData = await ProjectEngine.importSoultune(file);
+          console.log("Importing .soultune ZIP:", projectData);
+        }
+        
+        if (projectData) {
+          initializeProject(projectData);
+          console.log("Project initialized in store");
+        }
      } catch (err) {
-        alert("Failed to load .soultune project. Ensure it's a valid archive.");
+        console.error("Import failed:", err);
+        alert("Failed to load project. Ensure it's a valid JSON or .soultune archive.");
      }
      if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -226,7 +243,7 @@ export function TopBar() {
         </div>
 
         <div className="flex items-center gap-2 border-r border-border pr-4 mr-2">
-            <input type="file" accept=".soultune" ref={fileInputRef} className="hidden" onChange={handleImportSoultune} />
+            <input type="file" accept=".soultune,.json" ref={fileInputRef} className="hidden" onChange={handleImportSoultune} />
             <button 
               onClick={() => fileInputRef.current?.click()} 
               className="flex h-7 px-3 items-center justify-center rounded-sm font-bold text-[9px] tracking-wider uppercase bg-panel border border-border text-text hover:bg-white/10 transition-colors"

@@ -21,7 +21,7 @@ class ExportEngineClass {
         }
 
         const urlsToLoad = validBlocks
-           .filter(b => b.type === 'voice' || b.type === 'guide')
+           .filter(b => b.type === 'voice' || b.type === 'guide' || b.type === 'atmosphere')
            .map(b => b.properties.fileUrl as string)
            .filter(Boolean);
 
@@ -34,10 +34,11 @@ class ExportEngineClass {
               if (audioCache.has(url)) return;
               try {
                  const res = await fetch(url);
+                 if (!res.ok) throw new Error(`Fetch failed: ${res.statusText}`);
                  const arr = await res.arrayBuffer();
                  const buf = await tempCtx.decodeAudioData(arr);
                  audioCache.set(url, buf);
-              } catch(e) { console.error("Failed to decode export audio", e); }
+              } catch(e) { console.error("Failed to decode export audio", url, e); }
            }));
         }
 
@@ -92,13 +93,17 @@ class ExportEngineClass {
           const endTimeCtx = block.end_time;
 
           if (block.type === 'atmosphere') {
+             const fileUrl = block.properties.fileUrl as string;
+             const buffer = fileUrl ? audioCache.get(fileUrl) : offlineNoiseBuffer;
+             if (!buffer) return;
+
              const noiseSource = offlineCtx.createBufferSource();
-             noiseSource.buffer = offlineNoiseBuffer;
+             noiseSource.buffer = buffer;
              noiseSource.loop = true;
 
              const filter = offlineCtx.createBiquadFilter();
              filter.type = 'lowpass';
-             filter.frequency.value = (block.properties.filterCutoff as number) ?? 150;
+             filter.frequency.value = (block.properties.filterCutoff as number) ?? 600;
 
              const fadeIn = (block.properties.fade_in as number) || 0;
              const fadeOut = (block.properties.fade_out as number) || 0;
@@ -306,7 +311,7 @@ class ExportEngineClass {
     const length = buffer.length * numOfChan * 2 + 44;
     const out = new ArrayBuffer(length);
     const view = new DataView(out);
-    let channels = [];
+    const channels = [];
     let sample = 0;
     let offset = 0;
     let pos = 0;

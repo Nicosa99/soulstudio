@@ -33,21 +33,34 @@ export async function POST(request: Request) {
 
   switch (event.type) {
     case "checkout.session.completed":
-      // First time subscription
-      const subscriptionId = session.subscription as string;
-      const customerId = session.customer as string;
-      const userId = session.metadata?.supabase_user_id || session.subscription_data?.metadata?.supabase_user_id;
+      // First time subscription or one-time payment
+      const checkoutSession = event.data.object as Stripe.Checkout.Session;
+      const subscriptionId = checkoutSession.subscription as string;
+      const customerId = checkoutSession.customer as string;
+      
+      // Try to find the user ID in multiple possible locations
+      const userId = checkoutSession.metadata?.supabase_user_id || 
+                     checkoutSession.client_reference_id ||
+                     (checkoutSession as any).subscription_data?.metadata?.supabase_user_id;
 
       if (userId) {
-        await supabaseAdmin
+        console.log(`Updating subscription for user ${userId} to active`);
+        const { error } = await supabaseAdmin
           .from("subscriptions")
           .upsert({
             user_id: userId,
             stripe_customer_id: customerId,
             subscription_id: subscriptionId,
             status: "active",
-            price_id: session.line_items?.[0]?.price?.id,
-          });
+            // We don't necessarily have line_items here unless expanded, 
+            // but we can at least set the status to active
+          }, { onConflict: 'user_id' });
+        
+        if (error) {
+          console.error(`Error updating subscription for user ${userId}:`, error);
+        }
+      } else {
+        console.error("No userId found in checkout.session.completed event metadata");
       }
       break;
 

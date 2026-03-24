@@ -34,112 +34,13 @@ export function JsonPlaybookPanel() {
       setSuccess(false);
       const parsed = JSON.parse(code);
       
-      let finalState: any = { tracks: [], blocks: [], name: "" };
-
-      // SMART PARSER V4: DIRECT dB MAPPING
-      if (parsed.flow_logic && parsed.spectral_definitions) {
-        console.log("Parsing Research Schema V4 (Direct dB)...");
-        
-        finalState.name = parsed.title || parsed.journey_id;
-        
-        const dynamicTracks: Track[] = [
-          { id: 'track-guide', name: 'THE GUIDE', type: 'guide', color: 'bg-track-guide text-track-guide', volume: 1.0 },
-          { id: 'track-atmosphere', name: 'ATMOSPHERICS', type: 'atmosphere', color: 'bg-track-atmo text-track-atmo', volume: 1.0 }
-        ];
-        
-        const convertedBlocks: Block[] = [];
-        let timelineCursor = 0;
-
-        let maxOscillators = 0;
-        Object.values(parsed.spectral_definitions).forEach((state: any) => {
-          if (state.oscillators?.length > maxOscillators) maxOscillators = state.oscillators.length;
-        });
-
-        for (let i = 0; i < maxOscillators; i++) {
-          dynamicTracks.push({
-            id: `track-entrainment-${i}`,
-            name: `LAYER ${i + 1}`,
-            type: 'entrainment',
-            color: i === 0 ? 'bg-track-carrier text-track-carrier' : 'bg-track-entrainment text-track-entrainment',
-            volume: 1.0
-          });
-        }
-
-        parsed.flow_logic.phases.forEach((phase: any) => {
-          const duration = phase.duration_sec || 60;
-          const spectralState = parsed.spectral_definitions[phase.target_spectral_state];
-          
-          if (spectralState && spectralState.oscillators) {
-            spectralState.oscillators.forEach((osc: any, index: number) => {
-              const beat = Math.abs(osc.freq_r - osc.freq_l);
-              const base = (osc.freq_r + osc.freq_l) / 2;
-
-              convertedBlocks.push({
-                id: crypto.randomUUID(),
-                track_id: `track-entrainment-${index}`,
-                asset_id: `osc-${phase.id}-${index}`,
-                label: `${phase.target_spectral_state.replace('state_', '').toUpperCase()}`,
-                type: 'entrainment',
-                start_time: timelineCursor,
-                end_time: timelineCursor + duration,
-                properties: {
-                  baseFrequency: base,
-                  targetStateHz: beat,
-                  // Convert linear vol (0.3) to dB (approx -10.5dB)
-                  volume: linearToDb(osc.vol), 
-                  waveform: osc.waveform || 'sine',
-                  comment: osc.comment || ""
-                }
-              });
-            });
-          }
-
-          if (phase.guidance_ref && phase.guidance_ref !== "") {
-            convertedBlocks.push({
-              id: crypto.randomUUID(),
-              track_id: 'track-guide',
-              asset_id: `voice-${phase.id}`,
-              label: "GUIDANCE: " + phase.id.replace('phase_', ''),
-              type: 'voice',
-              start_time: timelineCursor,
-              end_time: timelineCursor + duration,
-              properties: { volume: -3, fileUrl: phase.guidance_ref } // Default -3dB for clear voice
-            });
-          }
-
-          timelineCursor += duration;
-        });
-
-        // Add Noise Floor with NATIVE dB
-        if (parsed.audio_engine_config?.noise_floor) {
-          const nf = parsed.audio_engine_config.noise_floor;
-          convertedBlocks.push({
-            id: crypto.randomUUID(),
-            track_id: 'track-atmosphere',
-            asset_id: 'gen-noise',
-            label: `PINK NOISE (${nf.base_vol_db}dB)`,
-            type: 'atmosphere',
-            start_time: 0,
-            end_time: timelineCursor,
-            properties: { 
-              volume: nf.base_vol_db || -56, // USE NATIVE dB VALUE
-              filterCutoff: nf.filter_cutoff_hz || 600,
-              lfoRate: nf.lfo_rate_hz || 0.05
-            }
-          });
-        }
-
-        finalState.tracks = dynamicTracks;
-        finalState.blocks = convertedBlocks;
-      } 
-      else if (parsed.tracks && parsed.blocks) {
-        finalState = parsed;
-      }
-
-      initializeProject(finalState);
+      console.log("Applying JSON via Panel...", parsed);
+      initializeProject(parsed);
+      
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err: any) {
+      console.error("Panel Apply failed:", err);
       setError(err.message);
     }
   };

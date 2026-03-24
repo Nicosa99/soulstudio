@@ -1,37 +1,49 @@
 import { createClient } from "@/utils/supabase/server";
-import { NextResponse } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 import Stripe from "stripe";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2026-02-25.clover" as any,
 });
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
+    // Dynamically detect the correct origin (handles proxies/localhost correctly)
+    const baseUrl = request.nextUrl.origin;
+
     if (!user) {
-      return NextResponse.redirect(new URL("/login", process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3002"));
+      return NextResponse.redirect(new URL("/login", baseUrl));
     }
 
-    // Get stripe customer ID from DB
-    const { data: sub } = await supabase
+    // BRIEF DELAY: Allow the Stripe Webhook to complete its background database update
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    // 1. Try checking our database first
+    const { data: currentSub } = await supabase
       .from("subscriptions")
-      .select("stripe_customer_id")
+      .select("status, stripe_customer_id")
       .eq("user_id", user.id)
       .single();
 
-    if (sub?.stripe_customer_id) {
-      // Fetch active subscriptions directly from Stripe
+    if (currentSub?.status === 'active') {
+       console.log("Subscription already active in DB via Webhook");
+       return NextResponse.redirect(new URL("/studio", baseUrl));
+    }
+
+    // 2. Fallback: If webhook hasn't fired or failed, ask Stripe directly
+    if (currentSub?.stripe_customer_id) {
       const subscriptions = await stripe.subscriptions.list({
-        customer: sub.stripe_customer_id,
+        customer: currentSub.stripe_customer_id,
         status: "active",
         limit: 1,
       });
 
       if (subscriptions.data.length > 0) {
         const stripeSub = subscriptions.data[0];
+        console.log("Activating subscription via direct Stripe check (Fallback)");
         await supabase
           .from("subscriptions")
           .update({
@@ -42,9 +54,9 @@ export async function GET() {
       }
     }
 
-    return NextResponse.redirect(new URL("/studio", process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3002"));
+    return NextResponse.redirect(new URL("/studio", baseUrl));
   } catch (err: any) {
     console.error("Subscription sync error:", err);
-    return NextResponse.redirect(new URL("/studio", process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3002"));
+    return NextResponse.redirect(new URL("/studio", request.nextUrl.origin));
   }
 }

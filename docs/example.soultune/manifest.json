@@ -1,0 +1,336 @@
+{
+  "journey_id": "focus_12_intro",
+  "title": "Introduction to Focus 12 (Warm Solfeggio & Theta Depth)",
+  "version": "3.2",
+  "type": "linear",
+  "metadata": {
+    "author": "SoulTune Research",
+    "based_on": "Gateway Wave II - Intro Focus 12 (Neuro-Aesthetic Tuning)",
+    "target_state": "Focus 12 (Deep Theta Body + Subtle Alpha Mind)",
+    "duration_sec": 2700
+  },
+  "audio_engine_config": {
+    "sample_rate": 48000,
+    "bit_depth": 24,
+    "noise_floor": {
+      "type": "pink",
+      "filter_cutoff_hz": 600,
+      "lfo_rate_hz": 0.05,
+      "base_vol_db": -56.0,
+      "comment": "Soft Pink Noise (Summer Rain Texture)"
+    },
+    "background_music": {
+      "enabled": true,
+      "volume_db": -19.5,
+      "crossfade_sec": 10.0,
+      "tracks": [
+        "assets/audio/gateway/songs/celestial_ascension_phychich_drift.mp3",
+        "assets/audio/gateway/songs/the_etheral_threshold.mp3",
+        "assets/audio/gateway/songs/the_void_presence_gateway.mp3"
+      ]
+    }
+  },
+  "spectral_definitions": {
+    "state_c1_calibration": {
+      "description": "C-1: Beta (14Hz Beat) centered on 100Hz/200Hz",
+      "oscillators": [
+        {
+          "freq_l": 93.0,
+          "freq_r": 107.0,
+          "vol": 0.30,
+          "comment": "Center: 100Hz | Beat: 14Hz (Beta Anchor)"
+        },
+        {
+          "freq_l": 193.0,
+          "freq_r": 207.0,
+          "vol": 0.20,
+          "comment": "Center: 200Hz | Beat: 14Hz (Beta Focus)"
+        }
+      ]
+    },
+    "state_resonant_tuning": {
+      "description": "Tuning: 6Hz Beat centered on Solfeggio 174Hz",
+      "oscillators": [
+        {
+          "freq_l": 171.0,
+          "freq_r": 177.0,
+          "vol": 0.28,
+          "waveform": "sine",
+          "comment": "Center: 174Hz (Pain/Security) | Beat: 6Hz"
+        },
+        {
+          "freq_l": 345.0,
+          "freq_r": 351.0,
+          "vol": 0.22,
+          "waveform": "sine",
+          "comment": "Center: 348Hz (Octave) | Beat: 6Hz"
+        },
+        {
+          "freq_l": 97.0,
+          "freq_r": 103.0,
+          "vol": 0.15,
+          "comment": "Center: 100Hz (Ground) | Beat: 6Hz"
+        }
+      ]
+    },
+    "state_rebal_building": {
+      "description": "REBAL: 4Hz Beat centered on Solfeggio 174Hz",
+      "oscillators": [
+        {
+          "freq_l": 172.0,
+          "freq_r": 176.0,
+          "vol": 0.25,
+          "comment": "Center: 174Hz | Beat: 4Hz (Theta Core)"
+        },
+        {
+          "freq_l": 526.0,
+          "freq_r": 530.0,
+          "vol": 0.20,
+          "comment": "Center: 528Hz (Transformation) | Beat: 4Hz"
+        },
+        {
+          "freq_l": 98.0,
+          "freq_r": 102.0,
+          "vol": 0.15,
+          "comment": "Center: 100Hz | Beat: 4Hz"
+        }
+      ]
+    },
+    "state_focus_10_deep": {
+      "description": "F10: MABA - Precision Theta (4Hz) on Solfeggio Scale",
+      "oscillators": [
+        {
+          "freq_l": 172.0,
+          "freq_r": 176.0,
+          "vol": 0.25,
+          "comment": "Center: 174Hz (Base) | Beat: 4Hz"
+        },
+        {
+          "freq_l": 394.0,
+          "freq_r": 398.0,
+          "vol": 0.18,
+          "comment": "Center: 396Hz (Liberation) | Beat: 4Hz - Pre-F12 priming"
+        },
+        {
+          "freq_l": 98.0,
+          "freq_r": 102.0,
+          "vol": 0.18,
+          "comment": "Center: 100Hz | Beat: 4Hz"
+        }
+      ]
+    },
+    "state_focus_12_entry": {
+      "description": "F12 Entry: 396Hz (Fear Liberation) @ 10Hz Alpha",
+      "oscillators": [
+        {
+          "freq_l": 172.0,
+          "freq_r": 176.0,
+          "vol": 0.25,
+          "comment": "DOMINANT Body Anchor: Center 174Hz | Beat 4Hz"
+        },
+        {
+          "freq_l": 391.0,
+          "freq_r": 401.0,
+          "vol": 0.20,
+          "comment": "Mind Expansion: Center 396Hz (Liberating Fear) | Beat 10Hz Alpha"
+        },
+        {
+          "freq_l": 412.0,
+          "freq_r": 422.0,
+          "vol": 0.12,
+          "comment": "Mind Clarity: Center 417Hz (Change) | Beat 10Hz Alpha"
+        },
+        {
+          "freq_l": 98.0,
+          "freq_r": 102.0,
+          "vol": 0.18,
+          "comment": "Ground Anchor: Center 100Hz | Beat 4Hz"
+        }
+      ]
+    },
+    "state_focus_12_stable": {
+      "description": "F12 Stable: Theta Ocean + Alpha Sparkle (285Hz Warmth)",
+      "oscillators": [
+        {
+          "freq_l": 172.0,
+          "freq_r": 176.0,
+          "vol": 0.30,
+          "comment": "DOMINANT Body Anchor: Center 174Hz | Beat 4Hz (Theta leads)"
+        },
+        {
+          "freq_l": 280.0,
+          "freq_r": 290.0,
+          "vol": 0.14,
+          "comment": "SUBTLE Warmth: Center 285Hz (Restoration) | Beat 10Hz Alpha (Whisper)"
+        },
+        {
+          "freq_l": 412.0,
+          "freq_r": 422.0,
+          "vol": 0.08,
+          "comment": "MINIMAL Clarity: Center 417Hz (Change) | Beat 10Hz Alpha (Shimmer)"
+        },
+        {
+          "freq_l": 98.0,
+          "freq_r": 102.0,
+          "vol": 0.20,
+          "comment": "STRONG Ground: Center 100Hz | Beat 4Hz"
+        }
+      ]
+    }
+  },
+  "flow_logic": {
+    "rounds": 1,
+    "phases": [
+      {
+        "id": "phase_1_intro_threshold",
+        "trigger": "fixed_duration",
+        "duration_sec": 90,
+        "target_spectral_state": "state_c1_calibration",
+        "transition_type": "fade_in",
+        "guidance_ref": "assets/audio/gateway/focus12/intro_f12.mp3",
+        "visual_cue": "threshold_door",
+        "loop_audio": false
+      },
+      {
+        "id": "phase_2_steps_overview",
+        "trigger": "fixed_duration",
+        "duration_sec": 45,
+        "target_spectral_state": "state_c1_calibration",
+        "transition_type": "hold",
+        "guidance_ref": "assets/audio/gateway/focus12/steps_f12.mp3",
+        "visual_cue": "sequence_overview",
+        "loop_audio": false
+      },
+      {
+        "id": "phase_3_ecb",
+        "trigger": "fixed_duration",
+        "duration_sec": 180,
+        "target_spectral_state": "state_c1_calibration",
+        "transition_type": "hold",
+        "guidance_ref": "assets/audio/gateway/focus12/ecb_f12.mp3",
+        "visual_cue": "energy_conversion_box",
+        "loop_audio": false
+      },
+      {
+        "id": "phase_4_resonant_tuning",
+        "trigger": "fixed_duration",
+        "duration_sec": 240,
+        "target_spectral_state": "state_resonant_tuning",
+        "transition_type": "ramp_linear",
+        "guidance_ref": "assets/audio/gateway/focus12/resonate_tuning_f12.mp3",
+        "visual_cue": "resonant_breath",
+        "loop_audio": false
+      },
+      {
+        "id": "phase_5_rebal",
+        "trigger": "fixed_duration",
+        "duration_sec": 240,
+        "target_spectral_state": "state_rebal_building",
+        "transition_type": "crossfade",
+        "guidance_ref": "assets/audio/gateway/focus12/rebal_f12.mp3",
+        "visual_cue": "toroidal_field",
+        "loop_audio": false
+      },
+      {
+        "id": "phase_6_affirmation",
+        "trigger": "fixed_duration",
+        "duration_sec": 180,
+        "target_spectral_state": "state_resonant_tuning",
+        "transition_type": "hold",
+        "guidance_ref": "assets/audio/gateway/focus12/affirmation_f12.mp3",
+        "visual_cue": "protection_shield",
+        "loop_audio": false
+      },
+      {
+        "id": "phase_7_f10_breathing",
+        "trigger": "fixed_duration",
+        "duration_sec": 150,
+        "target_spectral_state": "state_focus_10_deep",
+        "transition_type": "ramp_linear",
+        "guidance_ref": "assets/audio/gateway/focus12/f10_breathing_f12.mp3",
+        "visual_cue": "breathe_ten_signal",
+        "loop_audio": false
+      },
+      {
+        "id": "phase_8_f10_countdown",
+        "trigger": "fixed_duration",
+        "duration_sec": 240,
+        "target_spectral_state": "state_focus_10_deep",
+        "transition_type": "ramp_exponential",
+        "guidance_ref": "assets/audio/gateway/focus12/f10_count_f12.mp3",
+        "visual_cue": "countdown_10_to_1",
+        "loop_audio": false
+      },
+      {
+        "id": "phase_9_first_10_to_12",
+        "trigger": "fixed_duration",
+        "duration_sec": 60,
+        "target_spectral_state": "state_focus_12_entry",
+        "transition_type": "ramp_linear",
+        "guidance_ref": "assets/audio/gateway/focus12/count_first_f12.mp3",
+        "visual_cue": "geometry_expansion",
+        "loop_audio": false
+      },
+      {
+        "id": "phase_10_f12_exploration_1",
+        "trigger": "fixed_duration",
+        "duration_sec": 420,
+        "target_spectral_state": "state_focus_12_stable",
+        "transition_type": "crossfade",
+        "guidance_ref": null,
+        "visual_cue": "infinite_void",
+        "loop_audio": true,
+        "modulation": {
+          "type": "panning_drift",
+          "rate": 0.08,
+          "depth": 0.7
+        }
+      },
+      {
+        "id": "phase_11_return_12_to_10",
+        "trigger": "fixed_duration",
+        "duration_sec": 60,
+        "target_spectral_state": "state_focus_10_deep",
+        "transition_type": "ramp_linear",
+        "guidance_ref": "assets/audio/gateway/focus12/return_f10_f12.mp3",
+        "visual_cue": "contraction_to_body",
+        "loop_audio": false
+      },
+      {
+        "id": "phase_12_second_10_to_12",
+        "trigger": "fixed_duration",
+        "duration_sec": 60,
+        "target_spectral_state": "state_focus_12_entry",
+        "transition_type": "ramp_linear",
+        "guidance_ref": "assets/audio/gateway/focus12/count_second_f12.mp3",
+        "visual_cue": "expansion_fast",
+        "loop_audio": false
+      },
+      {
+        "id": "phase_13_f12_exploration_2",
+        "trigger": "fixed_duration",
+        "duration_sec": 540,
+        "target_spectral_state": "state_focus_12_stable",
+        "transition_type": "crossfade",
+        "guidance_ref": null,
+        "visual_cue": "deep_space_drift",
+        "loop_audio": true,
+        "modulation": {
+          "type": "panning_drift",
+          "rate": 0.10,
+          "depth": 0.85
+        }
+      },
+      {
+        "id": "phase_14_outro_return_c1",
+        "trigger": "fixed_duration",
+        "duration_sec": 195,
+        "target_spectral_state": "state_c1_calibration",
+        "transition_type": "ramp_logarithmic",
+        "guidance_ref": "assets/audio/gateway/focus12/outro_f12.mp3",
+        "visual_cue": "waking_consciousness",
+        "loop_audio": false
+      }
+    ]
+  }
+}

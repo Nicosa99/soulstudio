@@ -13,6 +13,9 @@ export class AudioEngine {
   private activeBlocks = new Map<string, any>();
   private noiseBuffer: AudioBuffer | null = null;
   private audioCache = new Map<string, AudioBuffer>();
+  
+  private wasmModule: WebAssembly.Module | null = null;
+  private isWasmLoaded = false;
 
   // Helper: Convert dB to Linear Gain
   private dbToGain(db: number): number {
@@ -22,17 +25,30 @@ export class AudioEngine {
 
   // Helper: Handle mixed input (Percentage or dB)
   private getGainFromVolume(vol: number): number {
-    // If volume is negative (e.g. -20), treat as dB
     if (vol < 0) return this.dbToGain(vol);
-    // Otherwise treat as percentage (0-100)
     return vol / 100;
   }
 
-  init() {
+  async init() {
     if (this.ctx) return;
     const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
-    this.ctx = new AudioCtor();
+    this.ctx = new AudioCtor({ sampleRate: 48000 }); // strict 48000Hz for neuro-acoustic C++ WASM
     this.createBrownNoiseBuffer();
+
+    if (!this.isWasmLoaded) {
+      try {
+        const response = await fetch('/worklets/soul_synth.wasm');
+        if (response.ok) {
+          const wasmBuffer = await response.arrayBuffer();
+          this.wasmModule = await WebAssembly.compile(wasmBuffer);
+          await this.ctx.audioWorklet.addModule('/worklets/SoulTuneProcessor.js');
+          this.isWasmLoaded = true;
+          console.log("AudioEngine: Wasm God-Mode initialized.");
+        }
+      } catch (err) {
+        console.error("Failed to load Wasm audio module:", err);
+      }
+    }
   }
 
   private createBrownNoiseBuffer() {
@@ -50,7 +66,7 @@ export class AudioEngine {
   }
 
   async playSequencer(blocks: Block[], startOffset: number = 0, masterTuning: number = 432) {
-    this.init();
+    await this.init();
     if (!this.ctx) return;
     
     const urlsToLoad = blocks
@@ -69,7 +85,7 @@ export class AudioEngine {
        }));
     }
 
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+    if (this.ctx.state === 'suspended') await this.ctx.resume();
     if (this.isPlaying) return;
 
     this.baseTime = this.ctx.currentTime + 0.05;
@@ -85,7 +101,7 @@ export class AudioEngine {
     this.masterCompressor.connect(this.ctx.destination);
 
     this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.value = 0.7; 
+    this.masterGain.gain.value = 0.7; // Hard limit master headroom
     
     this.masterAnalyser = this.ctx.createAnalyser();
     this.masterAnalyser.fftSize = 2048;
@@ -144,7 +160,6 @@ export class AudioEngine {
       else if (block.type === 'carrier' || block.type === 'entrainment') {
          const baseFreq = (block.properties.baseFrequency as number) ?? 100.0;
          const targetHz = (block.properties.targetStateHz as number) || 0;
-         const waveform = (block.properties.waveform as string ?? 'sine') as OscillatorType;
          const harmonizerLevel = (block.properties.harmonizerLevel as number) ?? 0;
          const levelFraction = harmonizerLevel / 100;
          const fadeIn = (block.properties.fade_in as number) || 0;
@@ -155,58 +170,40 @@ export class AudioEngine {
          blockGain.gain.setValueAtTime(0, Math.max(0, nodeStart - 0.01));
          if (fadeIn > 0) blockGain.gain.linearRampToValueAtTime(vol, nodeStart + fadeIn);
          else blockGain.gain.setTargetAtTime(vol, nodeStart, 0.05);
-
-         const pannerL = this.ctx.createStereoPanner();
-         pannerL.pan.value = -1;
-         const pannerR = this.ctx.createStereoPanner();
-         pannerR.pan.value = 1;
-         const spatialPanner = this.ctx.createStereoPanner();
-         spatialPanner.pan.value = 0;
-
-         pannerL.connect(spatialPanner);
-         pannerR.connect(spatialPanner);
-         spatialPanner.connect(blockGain);
          blockGain.connect(destNode);
 
-         const oscillatorsL: OscillatorNode[] = [];
-         const oscillatorsR: OscillatorNode[] = [];
-         const overtoneGainsL: GainNode[] = [];
-         const overtoneGainsR: GainNode[] = [];
+         // We use the new Wasm God-Mode nodes if available
+         const wasmNodes: AudioWorkletNode[] = [];
 
-         const spawnBinauralPair = (mult: number, volFactor: number) => {
-             const oscL = this.ctx!.createOscillator();
-             oscL.type = waveform;
-             oscL.frequency.value = baseFreq * mult;
-             const gainL = this.ctx!.createGain();
-             gainL.gain.value = volFactor;
-             oscL.connect(gainL);
-             gainL.connect(pannerL);
-             oscillatorsL.push(oscL);
-             overtoneGainsL.push(gainL);
+         if (this.isWasmLoaded && this.wasmModule) {
+            const spawnWasmPair = (mult: number, volFactor: number) => {
+                const worklet = new AudioWorkletNode(this.ctx!, 'soul-tune-processor', {
+                   outputChannelCount: [2],
+                   processorOptions: { wasmModule: this.wasmModule }
+                });
+                
+                worklet.port.postMessage({
+                    type: 'UPDATE_PLAYBOOK',
+                    carrier: baseFreq * mult,
+                    beat: targetHz * mult,
+                    volume: volFactor
+                });
+   
+                worklet.connect(blockGain);
+                wasmNodes.push(worklet);
+            };
 
-             const oscR = this.ctx!.createOscillator();
-             oscR.type = waveform;
-             oscR.frequency.value = (baseFreq + targetHz) * mult;
-             const gainR = this.ctx!.createGain();
-             gainR.gain.value = volFactor;
-             oscR.connect(gainR);
-             gainR.connect(pannerR);
-             oscillatorsR.push(oscR);
-             overtoneGainsR.push(gainR);
-         };
-
-         spawnBinauralPair(1, 1.0);
-         spawnBinauralPair(2, 0.3 * levelFraction);
-         spawnBinauralPair(3, 0.1 * levelFraction);
-
-         [...oscillatorsL, ...oscillatorsR].forEach(osc => { osc.start(nodeStart); osc.stop(endTimeCtx); });
+            spawnWasmPair(1, 1.0);
+            spawnWasmPair(2, 0.3 * levelFraction);
+            spawnWasmPair(3, 0.1 * levelFraction);
+         }
 
          if (fadeOut > 0) {
              blockGain.gain.setValueAtTime(vol, Math.max(nodeStart, endTimeCtx - fadeOut));
              blockGain.gain.linearRampToValueAtTime(0, endTimeCtx);
          } else blockGain.gain.setTargetAtTime(0, Math.max(0, endTimeCtx - 0.05), 0.01);
 
-         this.activeBlocks.set(block.id, { type: block.type, oscillatorsL, oscillatorsR, overtoneGainsL, overtoneGainsR, blockGain, spatialPanner });
+         this.activeBlocks.set(block.id, { type: block.type, wasmNodes, blockGain });
       }
       else if (block.type === 'voice' || block.type === 'guide') {
          const fileUrl = block.properties.fileUrl as string;
@@ -234,10 +231,10 @@ export class AudioEngine {
     this.isPlaying = true;
   }
 
-  updateBlockProperties(blocks: Block[], masterTuning: number) {
+  updateBlockProperties(blocks: Block[], tracks: Track[], masterTuning: number) {
      if (!this.isPlaying || !this.ctx) return;
      const now = this.ctx.currentTime;
-     const { tracks } = useStudioStore.getState();
+     // The tracks are passed in, so we don't strictly need to fetch them from the store, but we can use them to update panning/volume.
      tracks.forEach(track => {
         const channel = this.trackChannels.get(track.id);
         if (channel) {
@@ -256,11 +253,14 @@ export class AudioEngine {
            const targetHz = (block.properties.targetStateHz as number) || 0;
            const harmonizerLevel = (block.properties.harmonizerLevel as number) ?? 0;
            const levelFraction = harmonizerLevel / 100;
+           
            group.blockGain.gain.setTargetAtTime(vol * (group.type === 'carrier' ? 0.6 : 1.0), now, 0.05);
-           group.oscillatorsL[0].frequency.setTargetAtTime(baseFreq, now, 0.1);
-           group.oscillatorsR[0].frequency.setTargetAtTime(baseFreq + targetHz, now, 0.1);
-           group.overtoneGainsL[1].gain.setTargetAtTime(0.3 * levelFraction, now, 0.1);
-           group.overtoneGainsR[1].gain.setTargetAtTime(0.3 * levelFraction, now, 0.1);
+           
+           if (group.wasmNodes && group.wasmNodes.length >= 3) {
+               group.wasmNodes[0].port.postMessage({ carrier: baseFreq, beat: targetHz, volume: 1.0 });
+               group.wasmNodes[1].port.postMessage({ carrier: baseFreq * 2, beat: targetHz * 2, volume: 0.3 * levelFraction });
+               group.wasmNodes[2].port.postMessage({ carrier: baseFreq * 3, beat: targetHz * 3, volume: 0.1 * levelFraction });
+           }
         }
         else if (group.type === 'atmosphere') {
            group.gain.gain.setTargetAtTime(vol * 0.4, now, 0.05);
@@ -285,8 +285,9 @@ export class AudioEngine {
     if (!this.ctx) return;
     this.activeBlocks.forEach(group => {
        try {
-          if (group.oscillatorsL) group.oscillatorsL.forEach((o: any) => o.stop());
-          if (group.oscillatorsR) group.oscillatorsR.forEach((o: any) => o.stop());
+          if (group.wasmNodes) {
+              group.wasmNodes.forEach((node: AudioWorkletNode) => node.disconnect());
+          }
           if (group.source) group.source.stop();
        } catch (e) {}
     });

@@ -131,17 +131,164 @@ export const useStudioStore = create<StudioState>()(
 
       setProjectName: (name) => set({ projectName: name, saveStatus: 'unsaved' }),
 
-      initializeProject: (data) => set((state) => ({ 
-        projectName: data.name || (data as any).projectName || state.projectName || "Untitled Journey",
-        // DEEP HYDRATION: Ensure all nested properties of tracks and blocks are preserved
-        tracks: data.tracks && data.tracks.length > 0 
-          ? data.tracks.map(t => ({ ...t, volume: t.volume ?? 1.0, pan: t.pan ?? 0.0 })) 
-          : INITIAL_TRACKS, 
-        blocks: data.blocks 
-          ? data.blocks.map(b => ({ ...b, properties: { ...b.properties } })) 
-          : [],
-        saveStatus: 'saved' 
-      })),
+      initializeProject: (data: any) => set((state) => {
+        let tracks = data.tracks || [];
+        let blocks = data.blocks || [];
+        const name = data.name || data.projectName || data.title || data.journey_id || state.projectName;
+
+        // SMART PARSER V4: Handle Research Playbook Schema
+        if (data.flow_logic && data.spectral_definitions) {
+          console.log("Store: Parsing Research Schema V4...");
+          
+          const linearToDb = (linear: number) => {
+            if (linear <= 0) return -100;
+            return Math.round(20 * Math.log10(linear) * 10) / 10;
+          };
+
+          const normalizePath = (path: string) => {
+            if (!path) return "";
+            if (path.startsWith('http') || path.startsWith('blob:')) return path;
+            return path.startsWith('/') ? path : `/${path}`;
+          };
+
+          const dynamicTracks: Track[] = [
+            { id: 'track-guide', name: 'THE GUIDE', type: 'guide', color: 'bg-track-guide text-track-guide', volume: 1.0, pan: 0.0 },
+            { id: 'track-atmosphere', name: 'PINK NOISE', type: 'atmosphere', color: 'bg-track-atmo text-track-atmo', volume: 1.0, pan: 0.0 }
+          ];
+
+          // Add ONE track for BGM Playlist
+          if (data.audio_engine_config?.background_music?.enabled) {
+            dynamicTracks.push({
+              id: 'track-bgm-playlist',
+              name: 'BGM PLAYLIST',
+              type: 'atmosphere',
+              color: 'bg-track-atmo text-track-atmo',
+              volume: 1.0,
+              pan: 0.0
+            });
+          }
+          
+          const convertedBlocks: Block[] = [];
+          let timelineCursor = 0;
+
+          let maxOscillators = 0;
+          Object.values(data.spectral_definitions).forEach((stateDef: any) => {
+            if (stateDef.oscillators?.length > maxOscillators) maxOscillators = stateDef.oscillators.length;
+          });
+
+          for (let i = 0; i < maxOscillators; i++) {
+            dynamicTracks.push({
+              id: `track-entrainment-${i}`,
+              name: `LAYER ${i + 1}`,
+              type: 'entrainment',
+              color: i === 0 ? 'bg-track-carrier text-track-carrier' : 'bg-track-entrainment text-track-entrainment',
+              volume: 1.0,
+              pan: 0.0
+            });
+          }
+
+          data.flow_logic.phases.forEach((phase: any) => {
+            const duration = phase.duration_sec || 60;
+            const spectralState = data.spectral_definitions[phase.target_spectral_state];
+            
+            if (spectralState && spectralState.oscillators) {
+              spectralState.oscillators.forEach((osc: any, index: number) => {
+                const beat = Math.abs(osc.freq_r - osc.freq_l);
+                const base = (osc.freq_r + osc.freq_l) / 2;
+
+                convertedBlocks.push({
+                  id: crypto.randomUUID(),
+                  track_id: `track-entrainment-${index}`,
+                  asset_id: `osc-${phase.id}-${index}`,
+                  label: `${phase.target_spectral_state.replace('state_', '').toUpperCase()}`,
+                  type: 'entrainment',
+                  start_time: timelineCursor,
+                  end_time: timelineCursor + duration,
+                  properties: {
+                    baseFrequency: base,
+                    targetStateHz: beat,
+                    volume: linearToDb(osc.vol), 
+                    waveform: osc.waveform || 'sine',
+                    comment: osc.comment || ""
+                  }
+                });
+              });
+            }
+
+            if (phase.guidance_ref && phase.guidance_ref !== "") {
+              convertedBlocks.push({
+                id: crypto.randomUUID(),
+                track_id: 'track-guide',
+                asset_id: `voice-${phase.id}`,
+                label: "GUIDANCE: " + phase.id.replace('phase_', ''),
+                type: 'voice',
+                start_time: timelineCursor,
+                end_time: timelineCursor + duration,
+                properties: { 
+                  volume: -3, 
+                  fileUrl: normalizePath(phase.guidance_ref) 
+                }
+              });
+            }
+
+            timelineCursor += duration;
+          });
+
+          if (data.audio_engine_config?.background_music?.enabled) {
+            const bgm = data.audio_engine_config.background_music;
+            const bgmTracks = bgm.tracks || [];
+            const bgmVol = bgm.volume_db || -20;
+            if (bgmTracks.length > 0) {
+              const slotDuration = timelineCursor / bgmTracks.length;
+              bgmTracks.forEach((trackUrl: string, idx: number) => {
+                convertedBlocks.push({
+                  id: crypto.randomUUID(),
+                  track_id: 'track-bgm-playlist',
+                  asset_id: `bgm-${idx}`,
+                  label: `SONG: ${trackUrl.split('/').pop()}`,
+                  type: 'atmosphere',
+                  start_time: idx * slotDuration,
+                  end_time: (idx + 1) * slotDuration,
+                  properties: { 
+                    volume: bgmVol,
+                    fileUrl: normalizePath(trackUrl),
+                    fade_in: bgm.crossfade_sec || 10,
+                    fade_out: bgm.crossfade_sec || 10
+                  }
+                });
+              });
+            }
+          }
+
+          if (data.audio_engine_config?.noise_floor) {
+            const nf = data.audio_engine_config.noise_floor;
+            convertedBlocks.push({
+              id: crypto.randomUUID(),
+              track_id: 'track-atmosphere',
+              asset_id: 'gen-noise',
+              label: `PINK NOISE (${nf.base_vol_db}dB)`,
+              type: 'atmosphere',
+              start_time: 0,
+              end_time: timelineCursor,
+              properties: { 
+                volume: nf.base_vol_db || -56,
+                filterCutoff: nf.filter_cutoff_hz || 600,
+                lfoRate: nf.lfo_rate_hz || 0.05
+              }
+            });
+          }
+
+          tracks = dynamicTracks;
+          blocks = convertedBlocks;
+        }
+
+        return { 
+          projectName: name,
+          tracks: tracks.length > 0 ? tracks.map((t: any) => ({ ...t, volume: t.volume ?? 1.0, pan: t.pan ?? 0.0 })) : INITIAL_TRACKS,
+          blocks: blocks.map((b: any) => ({ ...b, properties: { ...b.properties } })),
+          saveStatus: 'saved' 
+        };
+      }),
 
       setSubscriptionStatus: (status) => set({ subscriptionStatus: status }),
       setSaveStatus: (status) => set({ saveStatus: status }),

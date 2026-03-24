@@ -41,7 +41,11 @@ export function TimelineWorkspace() {
   // Reactive bridge from Store to AudioEngine
   useEffect(() => {
     if (isPlaying && AudioEngine) {
-      AudioEngine.updateBlockProperties(useStudioStore.getState().getComputedBlocks(), masterTuning);
+      AudioEngine.updateBlockProperties(
+        useStudioStore.getState().getComputedBlocks(), 
+        useStudioStore.getState().tracks,
+        masterTuning
+      );
     }
   }, [blocks, tracks, masterTuning, isPlaying]);
 

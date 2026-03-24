@@ -41,6 +41,8 @@ export async function POST(request: Request) {
 
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
+      client_reference_id: user.id, // Redundant fallback for webhook
+      metadata: { supabase_user_id: user.id }, // Metadata for the checkout session itself
       line_items: [
         {
           price: process.env.STRIPE_PRICE_ID_PRO,
@@ -51,7 +53,7 @@ export async function POST(request: Request) {
       success_url: `${request.headers.get("origin")}/api/subscription/sync`,
       cancel_url: `${request.headers.get("origin")}/studio`,
       subscription_data: {
-        metadata: { supabase_user_id: user.id },
+        metadata: { supabase_user_id: user.id }, // Metadata for the resulting subscription object
       },
     });
 
