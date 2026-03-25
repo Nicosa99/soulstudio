@@ -2,12 +2,13 @@ import { createClient } from "@/utils/supabase/server";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2026-02-25.clover" as any,
-});
-
 export async function POST(request: Request) {
   try {
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+      // @ts-expect-error - Clover is a specific preview version
+      apiVersion: "2026-02-25.clover",
+    });
+
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
@@ -58,8 +59,9 @@ export async function POST(request: Request) {
     });
 
     return NextResponse.json({ url: session.url });
-  } catch (err: any) {
+    } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Internal Server Error";
     console.error("Stripe Checkout Error:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
-  }
-}
+    return NextResponse.json({ error: message }, { status: 500 });
+    }
+    }

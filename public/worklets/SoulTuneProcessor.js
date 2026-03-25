@@ -2,82 +2,83 @@ class SoulTuneProcessor extends AudioWorkletProcessor {
     constructor(options) {
         super();
         
-        // Retrieve the compiled WebAssembly.Module sent from the main thread
-        const wasmModule = options.processorOptions.wasmModule;
-        
-        // Instantiate the WASM module synchronously since it's already compiled
-        const wasmInstance = new WebAssembly.Instance(wasmModule, {
-            env: {
-                emscripten_notify_memory_growth: function() {}
-            },
-            wasi_snapshot_preview1: {
-                proc_exit: function() {}
-            }
-        });
-        
-        this.wasm = wasmInstance.exports;
-        
-        // Standard Web Audio API frame size is 128
-        this.frames = 128;
-        
-        // Allocate Memory via Emscripten malloc. Float32 takes 4 bytes.
-        this.ptrLeft = this.wasm.malloc(this.frames * 4);
-        this.ptrRight = this.wasm.malloc(this.frames * 4);
-        
-        // Create TypedArray views mapped to the WASM memory buffer
-        this.outLeft = new Float32Array(this.wasm.memory.buffer, this.ptrLeft, this.frames);
-        this.outRight = new Float32Array(this.wasm.memory.buffer, this.ptrRight, this.frames);
-        
-        // Default DSP State
-        this.carrier = 0.0;
-        this.beat = 0.0;
-        this.volume = 0.0;
+        try {
+            const wasmModule = options.processorOptions.wasmModule;
+            const wasmInstance = new WebAssembly.Instance(wasmModule, {
+                env: {
+                    emscripten_notify_memory_growth: () => {}
+                },
+                wasi_snapshot_preview1: {
+                    proc_exit: () => {}
+                }
+            });
+            
+            this.wasm = wasmInstance.exports;
+            // Support both standard emscripten and our custom internal exports
+            this.malloc = this.wasm.malloc_internal || this.wasm.malloc;
+            this.free = this.wasm.free_internal || this.wasm.free;
 
-        // Message port receiver to update JSON state smoothly from AudioEngine
-        this.port.onmessage = (event) => {
-            const data = event.data;
-            if (data.type === 'UPDATE_PLAYBOOK') {
-                if (data.carrier !== undefined) this.carrier = data.carrier;
-                if (data.beat !== undefined) this.beat = data.beat;
-                if (data.volume !== undefined) this.volume = data.volume;
+            if (this.wasm.init_engine) this.wasm.init_engine();
+            
+            this.frames = 128;
+            if (this.malloc) {
+                this.ptrLeft = this.malloc(this.frames * 4);
+                this.ptrRight = this.malloc(this.frames * 4);
+                this.outLeft = new Float32Array(this.wasm.memory.buffer, this.ptrLeft, this.frames);
+                this.outRight = new Float32Array(this.wasm.memory.buffer, this.ptrRight, this.frames);
             }
-        };
+            
+            this.port.onmessage = (event) => {
+                const data = event.data;
+                if (!this.wasm) return;
+
+                if (data.type === 'SET_VOICE') {
+                    if (this.wasm.set_voice) {
+                        const mappedPan = (data.pan + 1) / 2;
+                        this.wasm.set_voice(data.index, data.carrier, data.beat, data.volume, data.harmonizer, mappedPan);
+                    }
+                } else if (data.type === 'STOP_VOICE') {
+                    if (this.wasm.stop_voice) this.wasm.stop_voice(data.index);
+                } else if (data.type === 'RESET') {
+                    if (this.wasm.init_engine) this.wasm.init_engine();
+                }
+            };
+        } catch (e) {
+            console.error("SoulTuneProcessor: Failed to initialize WASM", e);
+        }
     }
 
-    process(inputs, outputs, parameters) {
+    process(inputs, outputs) {
         const output = outputs[0];
-        
-        // We require strict stereo (binaural) channel configuration
-        if (!output || output.length < 2) return true;
+        if (!output || output.length < 2 || !this.wasm || !this.ptrLeft) return true;
         
         const channelLeft = output[0];
         const channelRight = output[1];
-        
-        // Memory views can be invalidated if the underlying WASM buffer grows
-        if (this.outLeft.buffer !== this.wasm.memory.buffer) {
+        const currentFrames = channelLeft.length;
+
+        // Re-allocate only if frame size changes (rare in Web Audio)
+        if (currentFrames !== this.frames && this.malloc && this.free) {
+            this.free(this.ptrLeft);
+            this.free(this.ptrRight);
+            this.frames = currentFrames;
+            this.ptrLeft = this.malloc(this.frames * 4);
+            this.ptrRight = this.malloc(this.frames * 4);
+            this.outLeft = new Float32Array(this.wasm.memory.buffer, this.ptrLeft, this.frames);
+            this.outRight = new Float32Array(this.wasm.memory.buffer, this.ptrRight, this.frames);
+        } else if (this.outLeft.buffer !== this.wasm.memory.buffer) {
+             // Re-view if memory grew
              this.outLeft = new Float32Array(this.wasm.memory.buffer, this.ptrLeft, this.frames);
              this.outRight = new Float32Array(this.wasm.memory.buffer, this.ptrRight, this.frames);
         }
 
-        // Delegate heavy floating-point calculation directly to pure C++ WASM
-        this.wasm.process_binaural(
-            this.ptrLeft, 
-            this.ptrRight, 
-            channelLeft.length, 
-            sampleRate, // globally available in AudioWorkletGlobalScope
-            this.carrier, 
-            this.beat, 
-            this.volume
-        );
-        
-        // Populate the JS Audio node output streams with the C++ generated arrays
-        channelLeft.set(this.outLeft);
-        channelRight.set(this.outRight);
+        if (this.wasm.process_binaural) {
+            this.wasm.process_binaural(this.ptrLeft, this.ptrRight, currentFrames, sampleRate);
+            channelLeft.set(this.outLeft.subarray(0, currentFrames));
+            channelRight.set(this.outRight.subarray(0, currentFrames));
+        }
 
-        // Keep Processor alive
         return true;
     }
 }
 
-// Register the processor in the AudioWorkletGlobalScope
 registerProcessor('soul-tune-processor', SoulTuneProcessor);

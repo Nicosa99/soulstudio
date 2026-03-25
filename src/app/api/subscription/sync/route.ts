@@ -2,12 +2,13 @@ import { createClient } from "@/utils/supabase/server";
 import { NextResponse, NextRequest } from "next/server";
 import Stripe from "stripe";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2026-02-25.clover" as any,
-});
-
 export async function GET(request: NextRequest) {
   try {
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+      // @ts-expect-error - Clover is a specific preview version
+      apiVersion: "2026-02-25.clover",
+    });
+
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
@@ -55,7 +56,7 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.redirect(new URL("/studio", baseUrl));
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Subscription sync error:", err);
     return NextResponse.redirect(new URL("/studio", request.nextUrl.origin));
   }

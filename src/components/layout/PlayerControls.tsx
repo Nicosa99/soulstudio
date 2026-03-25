@@ -2,7 +2,7 @@
 
 import { Play, Pause, Square, Rewind, FastForward } from "lucide-react";
 import { useStudioStore } from "@/store/useStudioStore";
-import { instance as AudioEngine } from "@/lib/audio/AudioEngine";
+import { instance as audio } from "@/lib/audio/AudioEngine";
 import { useEffect } from "react";
 
 export function PlayerControls() {
@@ -10,13 +10,13 @@ export function PlayerControls() {
 
   // Sync AudioEngine with store state on primary play toggle
   useEffect(() => {
-    if (!AudioEngine) return;
+    if (!audio) return;
     if (isPlaying) {
-      AudioEngine.playSequencer(blocks, currentTime);
+      audio.playSequencer(blocks, currentTime);
     } else {
-      AudioEngine.stop();
+      audio.stop();
     }
-  }, [isPlaying]); // Wait for explicit play state change to fully sync.
+  }, [isPlaying, blocks, currentTime]); // Wait for explicit play state change to fully sync.
 
   const handlePlay = () => {
     togglePlay();
@@ -24,19 +24,19 @@ export function PlayerControls() {
 
   const handleStop = () => {
     stop();
-    if (AudioEngine) {
-      AudioEngine.stop();
+    if (audio) {
+      audio.stop();
     }
   };
 
   const handleSeek = (amount: number) => {
     const newTime = Math.max(0, currentTime + amount);
-    seek(amount);
+    seek(newTime);
     
     // Auto-resume sync if playing
-    if (isPlaying && AudioEngine) {
-      AudioEngine.stop();
-      AudioEngine.playSequencer(blocks, newTime);
+    if (isPlaying && audio) {
+      audio.stop();
+      audio.playSequencer(blocks, newTime);
     }
   };
 

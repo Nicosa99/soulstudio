@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { instance as AudioEngine } from "@/lib/audio/AudioEngine";
+import { instance as audio } from "@/lib/audio/AudioEngine";
 import { useStudioStore } from "@/store/useStudioStore";
 
 export function MasterVisualizer() {
@@ -38,7 +38,7 @@ export function MasterVisualizer() {
          return;
       }
 
-      AudioEngine.getAnalyserData(dataArray);
+      audio.getAnalyserData(dataArray);
 
       ctx.lineWidth = 1.5;
       ctx.strokeStyle = '#00F0FF';
@@ -48,7 +48,7 @@ export function MasterVisualizer() {
       
       ctx.beginPath();
 
-      const sliceWidth = width * 1.0 / dataArray.length;
+      const sliceWidth = width / dataArray.length;
       let x = 0;
 
       for (let i = 0; i < dataArray.length; i++) {

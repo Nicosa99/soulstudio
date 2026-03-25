@@ -28,11 +28,58 @@ export interface Block {
   properties: Record<string, any>;
 }
 
+export interface ProjectData {
+  projectName?: string;
+  name?: string;
+  title?: string;
+  journey_id?: string;
+  tracks?: Track[];
+  blocks?: Block[];
+  flow_logic?: {
+    phases: Array<{
+      id: string;
+      duration_sec: number;
+      target_spectral_state: string;
+      guidance_ref?: string;
+    }>;
+  };
+  spectral_definitions?: Record<string, {
+    oscillators: Array<{
+      freq_l: number;
+      freq_r: number;
+      vol: number;
+      waveform?: string;
+      comment?: string;
+    }>;
+  }>;
+  audio_engine_config?: {
+    background_music?: {
+      enabled: boolean;
+      tracks: string[];
+      volume_db?: number;
+      crossfade_sec?: number;
+    };
+    noise_floor?: {
+      base_vol_db?: number;
+      filter_cutoff_hz?: number;
+      lfo_rate_hz?: number;
+    };
+  };
+}
+
+export interface UserUpload {
+  id: string;
+  name: string;
+  url: string;
+  type: string;
+  size: number;
+}
+
 export interface StudioState {
   projectName: string;
   tracks: Track[];
   blocks: Block[];
-  userUploads: any[];
+  userUploads: UserUpload[];
   activeSelection: string | null;
   selectedBlocks: string[];
   clipboard: Block | null;
@@ -47,16 +94,17 @@ export interface StudioState {
   zoomLevel: number;
   isSnapEnabled: boolean;
   isExporting: boolean;
+  exportProgress: number;
   isConsoleOpen: boolean;
   activeConsoleModule: string | null;
   lastRecordingUrl: string | null;
 
   // Actions
   setProjectName: (name: string) => void;
-  initializeProject: (data: { name?: string, tracks: Track[], blocks: Block[] }) => void;
+  initializeProject: (data: ProjectData) => void;
   setSubscriptionStatus: (status: SubscriptionStatus) => void;
   setSaveStatus: (status: SaveStatus) => void;
-  addUpload: (file: any) => void;
+  addUpload: (file: UserUpload) => void;
   addTrack: (track: Omit<Track, 'id'> & { id?: string }) => string;
   removeTrack: (id: string) => void;
   duplicateTrack: (id: string) => void;
@@ -90,6 +138,8 @@ export interface StudioState {
   setZoomLevel: (level: number) => void;
   setSnapEnabled: (enabled: boolean) => void;
   setExporting: (exporting: boolean) => void;
+  setExportProgress: (progress: number) => void;
+  setExportStatus: (exporting: boolean, progress: number) => void;
   setConsoleOpen: (open: boolean) => void;
   setActiveConsoleModule: (moduleId: string | null) => void;
   setLastRecordingUrl: (url: string | null) => void;
@@ -125,15 +175,16 @@ export const useStudioStore = create<StudioState>()(
       zoomLevel: 1,
       isSnapEnabled: true,
       isExporting: false,
+      exportProgress: 0,
       isConsoleOpen: false,
       activeConsoleModule: null,
       lastRecordingUrl: null,
 
       setProjectName: (name) => set({ projectName: name, saveStatus: 'unsaved' }),
 
-      initializeProject: (data: any) => set((state) => {
-        let tracks = data.tracks || [];
-        let blocks = data.blocks || [];
+      initializeProject: (data: ProjectData) => set((state) => {
+        let tracks: Track[] = data.tracks || [];
+        let blocks: Block[] = data.blocks || [];
         const name = data.name || data.projectName || data.title || data.journey_id || state.projectName;
 
         // SMART PARSER V4: Handle Research Playbook Schema
@@ -172,7 +223,7 @@ export const useStudioStore = create<StudioState>()(
           let timelineCursor = 0;
 
           let maxOscillators = 0;
-          Object.values(data.spectral_definitions).forEach((stateDef: any) => {
+          Object.values(data.spectral_definitions).forEach((stateDef) => {
             if (stateDef.oscillators?.length > maxOscillators) maxOscillators = stateDef.oscillators.length;
           });
 
@@ -187,12 +238,12 @@ export const useStudioStore = create<StudioState>()(
             });
           }
 
-          data.flow_logic.phases.forEach((phase: any) => {
+          data.flow_logic.phases.forEach((phase) => {
             const duration = phase.duration_sec || 60;
-            const spectralState = data.spectral_definitions[phase.target_spectral_state];
+            const spectralState = data.spectral_definitions ? data.spectral_definitions[phase.target_spectral_state] : undefined;
             
             if (spectralState && spectralState.oscillators) {
-              spectralState.oscillators.forEach((osc: any, index: number) => {
+              spectralState.oscillators.forEach((osc, index: number) => {
                 const beat = Math.abs(osc.freq_r - osc.freq_l);
                 const base = (osc.freq_r + osc.freq_l) / 2;
 
@@ -273,7 +324,7 @@ export const useStudioStore = create<StudioState>()(
               properties: { 
                 volume: nf.base_vol_db || -56,
                 filterCutoff: nf.filter_cutoff_hz || 600,
-                lfoRate: nf.lfo_rate_hz || 0.05
+                lfo_rate_hz: nf.lfo_rate_hz || 0.05
               }
             });
           }
@@ -284,8 +335,8 @@ export const useStudioStore = create<StudioState>()(
 
         return { 
           projectName: name,
-          tracks: tracks.length > 0 ? tracks.map((t: any) => ({ ...t, volume: t.volume ?? 1.0, pan: t.pan ?? 0.0 })) : INITIAL_TRACKS,
-          blocks: blocks.map((b: any) => ({ ...b, properties: { ...b.properties } })),
+          tracks: tracks.length > 0 ? tracks.map((t) => ({ ...t, volume: t.volume ?? 1.0, pan: t.pan ?? 0.0 })) : INITIAL_TRACKS,
+          blocks: blocks.map((b) => ({ ...b, properties: { ...b.properties } })),
           saveStatus: 'saved' 
         };
       }),
@@ -307,7 +358,9 @@ export const useStudioStore = create<StudioState>()(
       setBpm: (bpm) => set((state) => ({ bpm: Math.max(30, Math.min(200, bpm)), saveStatus: 'unsaved' })),
       setZoomLevel: (level) => set({ zoomLevel: level }),
       setSnapEnabled: (enabled) => set({ isSnapEnabled: enabled }),
-      setExporting: (exporting) => set({ isExporting: exporting }),
+      setExporting: (exporting) => set({ isExporting: exporting, exportProgress: exporting ? 0 : get().exportProgress }),
+      setExportProgress: (progress) => set({ exportProgress: progress }),
+      setExportStatus: (exporting, progress) => set({ isExporting: exporting, exportProgress: progress }),
       setConsoleOpen: (open) => set((state) => ({ isConsoleOpen: open, activeConsoleModule: open ? state.activeConsoleModule : null })),
       setActiveConsoleModule: (moduleId) => set({ activeConsoleModule: moduleId }),
       setLastRecordingUrl: (url) => set({ lastRecordingUrl: url }),

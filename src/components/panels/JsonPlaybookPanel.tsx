@@ -2,14 +2,8 @@
 
 import { useState, useEffect } from "react";
 import Editor from "@monaco-editor/react";
-import { useStudioStore, Block, Track } from "@/store/useStudioStore";
-import { Copy, Play, AlertCircle, CheckCircle2, Wand2 } from "lucide-react";
-
-// Helper: Convert linear gain (0.0 - 1.0) to decibels (dB)
-const linearToDb = (linear: number) => {
-  if (linear <= 0) return -100;
-  return Math.round(20 * Math.log10(linear) * 10) / 10;
-};
+import { useStudioStore } from "@/store/useStudioStore";
+import { Wand2 } from "lucide-react";
 
 export function JsonPlaybookPanel() {
   const { tracks: currentTracks, blocks, initializeProject, projectName } = useStudioStore();
@@ -19,7 +13,13 @@ export function JsonPlaybookPanel() {
 
   useEffect(() => {
     const currentState = { name: projectName, tracks: currentTracks, blocks };
-    setCode(JSON.stringify(currentState, null, 2));
+    const json = JSON.stringify(currentState, null, 2);
+    
+    // Use requestAnimationFrame to avoid "setState within effect" warning if it's strictly synchronous
+    const frame = requestAnimationFrame(() => {
+        setCode(prev => prev === json ? prev : json);
+    });
+    return () => cancelAnimationFrame(frame);
   }, [currentTracks, blocks, projectName]);
 
   const handleCopyPrompt = () => {
@@ -39,9 +39,13 @@ export function JsonPlaybookPanel() {
       
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
-    } catch (err: any) {
+    } catch (err) {
       console.error("Panel Apply failed:", err);
-      setError(err.message);
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError(String(err));
+      }
     }
   };
 

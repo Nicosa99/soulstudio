@@ -6,17 +6,14 @@ import { GlobalSettingsLCD } from "./GlobalSettingsLCD";
 import { MasterVisualizer } from "./MasterVisualizer";
 import { ExportModal } from "@/components/ui/ExportModal";
 import { useStudioStore } from "@/store/useStudioStore";
-import { instance as AudioEngine } from "@/lib/audio/AudioEngine";
 import { ExportEngine } from "@/lib/audio/ExportEngine";
 import { ProjectEngine } from "@/lib/audio/ProjectEngine";
-import { useState, useRef, useEffect } from "react";
-import { createClient } from "@/utils/supabase/client";
+import { useState, useRef, useEffect, useCallback } from "react";
 
 export function TopBar() {
   const { 
     projectName,
     setProjectName,
-    blocks, 
     masterTuning, 
     saveStatus, 
     zoomLevel, 
@@ -36,14 +33,12 @@ export function TopBar() {
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   
-  const supabase = createClient();
-
   // Recording Logic Refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordStartTimeRef = useRef<number>(0);
 
-  const startRecording = async () => {
+  const startRecording = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: { 
@@ -94,13 +89,13 @@ export function TopBar() {
       alert("Microphone access denied or failed.");
       toggleRecording(); // reset state
     }
-  };
+  }, [addBlock, currentTime, toggleRecording]);
 
-  const stopRecording = () => {
+  const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
-  };
+  }, []);
 
   // Sync isRecording state with actual Engine
   useEffect(() => {
@@ -109,14 +104,14 @@ export function TopBar() {
     } else {
       stopRecording();
     }
-  }, [isRecording]);
+  }, [isRecording, startRecording, stopRecording]);
 
   const handleSaveSoultune = async () => {
      try {
         const state = useStudioStore.getState();
         await ProjectEngine.exportSoultune(state.blocks, state.tracks);
         useStudioStore.setState({ saveStatus: 'saved' });
-     } catch (err) { alert("Failed to save .soultune project"); }
+     } catch { alert("Failed to save .soultune project"); }
   };
 
   const handleImportSoultune = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -124,7 +119,7 @@ export function TopBar() {
      if (!file) return;
      console.log("Loading file:", file.name, file.type);
      try {
-        let projectData: any;
+        let projectData: unknown;
         
         if (file.name.endsWith('.json')) {
           const text = await file.text();
@@ -136,7 +131,7 @@ export function TopBar() {
         }
         
         if (projectData) {
-          initializeProject(projectData);
+          initializeProject(projectData as Parameters<typeof initializeProject>[0]);
           console.log("Project initialized in store");
         }
      } catch (err) {
@@ -291,13 +286,13 @@ export function TopBar() {
                 setIsCheckingOut(true);
                 try {
                   const res = await fetch('/api/checkout', { method: 'POST' });
-                  const data = await res.json();
+                  const data = (await res.json()) as { url?: string; error?: string };
                   if (data.url) {
                     window.location.href = data.url;
                   } else {
                     alert(data.error || "Checkout Configuration Missing.");
                   }
-                } catch (e) {
+                } catch {
                   alert("Checkout routing failed.");
                 } finally {
                   setIsCheckingOut(false);

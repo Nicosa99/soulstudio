@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
 export async function POST(request: Request) {
   try {
-    const { text, voice = "alloy" } = await JSON.parse(await request.text());
-
     if (!process.env.OPENAI_API_KEY) {
       return NextResponse.json({ error: "OpenAI API Key missing in .env.local" }, { status: 500 });
     }
+
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+
+    const { text, voice = "alloy" } = await JSON.parse(await request.text());
 
     if (!text || text.length < 2) {
       return NextResponse.json({ error: "Text too short" }, { status: 400 });
@@ -30,8 +30,9 @@ export async function POST(request: Request) {
         "Content-Type": "audio/mpeg",
       },
     });
-  } catch (err: any) {
+    } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Internal Server Error";
     console.error("TTS Error:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
-  }
-}
+    return NextResponse.json({ error: message }, { status: 500 });
+    }
+    }

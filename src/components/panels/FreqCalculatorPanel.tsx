@@ -26,13 +26,14 @@ const BRAINWAVE_TARGETS = [
 ];
 
 export function FreqCalculatorPanel() {
-  const { addBlock, currentTime, setConsoleOpen } = useStudioStore();
+  const { addBlock, currentTime } = useStudioStore();
   const [lastAdded, setLastAdded] = useState<string | null>(null);
 
   const injectFreq = (name: string, base: number, beat: number = 0) => {
+    const id = crypto.randomUUID().substring(0, 8);
     addBlock({
       track_id: 'track-entrainment',
-      asset_id: `calc-${Date.now()}`,
+      asset_id: `calc-${id}`,
       label: name.toUpperCase(),
       type: beat > 0 ? 'entrainment' : 'carrier',
       start_time: currentTime,

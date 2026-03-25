@@ -4,10 +4,11 @@ import { useStudioStore } from "@/store/useStudioStore";
 import { TrackLane } from "@/components/timeline/TrackLane";
 import { Block } from "@/components/timeline/Block";
 import { useEffect, useRef, useState } from "react";
-import { instance as AudioEngine } from "@/lib/audio/AudioEngine";
+import { instance as audio } from "@/lib/audio/AudioEngine";
+import { Block as BlockType, Track as TrackType } from "@/store/useStudioStore";
 
 export function TimelineWorkspace() {
-  const { tracks, blocks, isRazorMode, setRazorMode, isPlaying, currentTime, setCurrentTime, masterTuning, activeSelection, splitBlock, setActiveSelection, zoomLevel, isSnapEnabled, getProjectDuration } = useStudioStore();
+  const { tracks, blocks, isRazorMode, setRazorMode, isPlaying, currentTime, setCurrentTime, splitBlock, zoomLevel, isSnapEnabled, getProjectDuration } = useStudioStore();
   const timelineRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   
@@ -23,8 +24,8 @@ export function TimelineWorkspace() {
   useEffect(() => {
     let animationFrameId: number;
     const animatePlayhead = () => {
-      if (isPlaying && AudioEngine) {
-        setCurrentTime(AudioEngine.getCurrentTime());
+      if (isPlaying && audio) {
+        setCurrentTime(audio.getCurrentTime());
         animationFrameId = requestAnimationFrame(animatePlayhead);
       }
     };
@@ -40,14 +41,13 @@ export function TimelineWorkspace() {
 
   // Reactive bridge from Store to AudioEngine
   useEffect(() => {
-    if (isPlaying && AudioEngine) {
-      AudioEngine.updateBlockProperties(
+    if (isPlaying && audio) {
+      audio.updateBlockProperties(
         useStudioStore.getState().getComputedBlocks(), 
-        useStudioStore.getState().tracks,
-        masterTuning
+        useStudioStore.getState().tracks
       );
     }
-  }, [blocks, tracks, masterTuning, isPlaying]);
+  }, [blocks, tracks, isPlaying]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -63,13 +63,15 @@ export function TimelineWorkspace() {
       // Undo: Ctrl + Z
       if (cmdOrCtrl && !e.shiftKey && e.key.toLowerCase() === 'z') {
         e.preventDefault();
-        (useStudioStore as any).temporal.getState().undo();
+        const temporal = (useStudioStore as unknown as { temporal: { getState: () => { undo: () => void } } }).temporal;
+        if (temporal) temporal.getState().undo();
       }
 
       // Redo: Ctrl + Shift + Z or Ctrl + Y
       if ((cmdOrCtrl && e.shiftKey && e.key.toLowerCase() === 'z') || (cmdOrCtrl && e.key.toLowerCase() === 'y')) {
         e.preventDefault();
-        (useStudioStore as any).temporal.getState().redo();
+        const temporal = (useStudioStore as unknown as { temporal: { getState: () => { redo: () => void } } }).temporal;
+        if (temporal) temporal.getState().redo();
       }
 
       // Copy: Ctrl + C
@@ -153,9 +155,9 @@ export function TimelineWorkspace() {
     setCurrentTime(newTime);
     
     // Auto-resume sync if playing
-    if (isPlaying && AudioEngine) {
-      AudioEngine.stop();
-      AudioEngine.playSequencer(useStudioStore.getState().getComputedBlocks(), newTime);
+    if (isPlaying && audio) {
+      audio.stop();
+      audio.playSequencer(useStudioStore.getState().getComputedBlocks(), newTime);
     }
   };
 
@@ -237,14 +239,14 @@ export function TimelineWorkspace() {
                    const maxY = Math.max(sliceStartY, sliceCurrentY);
                    
                    // Math: Ruler height = 32px. Track height = 96px.
-                   tracks.forEach((track: any, index: number) => {
+                   tracks.forEach((track: TrackType, index: number) => {
                       const trackTop = 32 + (index * 96);
                       const trackBottom = trackTop + 96;
                       
                       // Check if slice line passed through this track vertically
                       if (maxY >= trackTop - 10 && minY <= trackBottom + 10) {
-                          const blocksToSplit = blocks.filter((b: any) => b.track_id === track.id && b.start_time < splitTime && b.end_time > splitTime);
-                          blocksToSplit.forEach((b: any) => splitBlock(b.id, splitTime));
+                          const blocksToSplit = blocks.filter((b: BlockType) => b.track_id === track.id && b.start_time < splitTime && b.end_time > splitTime);
+                          blocksToSplit.forEach((b: BlockType) => splitBlock(b.id, splitTime));
                       }
                    });
                 }}
@@ -262,11 +264,11 @@ export function TimelineWorkspace() {
              </div>
            )}
 
-           {tracks.map((track: any) => (
+           {tracks.map((track: TrackType) => (
              <TrackLane key={track.id} track={track}>
                {blocks
-                 .filter((b: any) => b.track_id === track.id)
-                 .map((block: any) => (
+                 .filter((b: BlockType) => b.track_id === track.id)
+                 .map((block: BlockType) => (
                    <Block key={block.id} block={block} />
                  ))
                }

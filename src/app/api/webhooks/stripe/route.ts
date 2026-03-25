@@ -2,17 +2,18 @@ import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2026-02-25.clover" as any,
-});
-
-// We use the service role key to bypass RLS for administrative updates
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
 export async function POST(request: Request) {
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+    // @ts-expect-error - Clover is a specific preview version
+    apiVersion: "2026-02-25.clover",
+  });
+
+  // We use the service role key to bypass RLS for administrative updates
+  const supabaseAdmin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+
   const body = await request.text();
   const signature = request.headers.get("stripe-signature")!;
 
@@ -24,12 +25,11 @@ export async function POST(request: Request) {
       signature,
       process.env.STRIPE_WEBHOOK_SECRET!
     );
-  } catch (err: any) {
-    console.error(`Webhook signature verification failed: ${err.message}`);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error(`Webhook signature verification failed: ${message}`);
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
-
-  const session = event.data.object as any;
 
   switch (event.type) {
     case "checkout.session.completed":
@@ -37,11 +37,12 @@ export async function POST(request: Request) {
       const checkoutSession = event.data.object as Stripe.Checkout.Session;
       const subscriptionId = checkoutSession.subscription as string;
       const customerId = checkoutSession.customer as string;
-      
+
       // Try to find the user ID in multiple possible locations
       const userId = checkoutSession.metadata?.supabase_user_id || 
                      checkoutSession.client_reference_id ||
                      (checkoutSession as any).subscription_data?.metadata?.supabase_user_id;
+
 
       if (userId) {
         console.log(`Updating subscription for user ${userId} to active`);
