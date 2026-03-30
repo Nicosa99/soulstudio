@@ -141,6 +141,9 @@ function AtmospherePanel({ block, onProp }: { block: Block; onProp: (k: string, 
           <option value="rain">Rain</option>
         </select>
       </div>
+      <ParamRow label="FILTER CUTOFF" icon={<Activity size={14} className="text-cyan" />}
+        value={block.properties.filterCutoff ?? 600} min={20} max={2000} step={1} unit="Hz"
+        accentClass="accent-cyan" onChange={(v) => onProp('filterCutoff', v)} />
       <ParamRow label="VOLUME" icon={<Volume2 size={14} className="text-cyan" />}
         value={block.properties.volume ?? 50} min={0} max={100} unit="%"
         accentClass="accent-cyan" onChange={(v) => onProp('volume', v)} />

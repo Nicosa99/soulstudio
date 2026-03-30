@@ -43,8 +43,8 @@ export function TimelineWorkspace() {
   useEffect(() => {
     if (isPlaying && audio) {
       audio.updateBlockProperties(
-        useStudioStore.getState().getComputedBlocks(), 
-        useStudioStore.getState().tracks
+        blocks, 
+        tracks
       );
     }
   }, [blocks, tracks, isPlaying]);

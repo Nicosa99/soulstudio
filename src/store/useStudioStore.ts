@@ -69,10 +69,13 @@ export interface ProjectData {
 
 export interface UserUpload {
   id: string;
-  name: string;
-  url: string;
+  name?: string;
+  label?: string;
+  url?: string;
   type: string;
-  size: number;
+  size?: number;
+  properties?: Record<string, any>;
+  defaultDuration?: number;
 }
 
 export interface StudioState {

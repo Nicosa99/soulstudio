@@ -4,339 +4,309 @@ interface ActiveBlockGroup {
   type: string;
   source?: AudioBufferSourceNode;
   gain?: GainNode;
-  startTime: number;
-  endTime: number;
+  filter?: BiquadFilterNode;
   voiceIndex?: number;
+  endTime: number;
 }
 
-export class AudioEngine {
-  private ctx: AudioContext | null = null;
-  public isPlaying = false;
-  private baseTime = 0;
-  public currentOffset = 0;
+// ─── GLOBAL HARDWARE & MEMORY (Bypasses HMR Resets) ──────────────────────────
+const getGlobalStore = () => {
+    if (typeof window === 'undefined') return {} as any;
+    const win = window as any;
+    if (!win.__SOUL_AUDIO_MEMORY__) {
+        win.__SOUL_AUDIO_MEMORY__ = {
+            ctx: null,
+            wasmNode: null,
+            activeBlocks: new Map<string, ActiveBlockGroup>(),
+            scheduledIds: new Set<string>(),
+            voices: Array.from({ length: 32 }, (_, i) => i),
+            audioCache: new Map<string, AudioBuffer>(),
+            pinkNoiseBuffer: null,
+            brownNoiseBuffer: null,
+            isPlaying: false,
+            baseTime: 0,
+            currentOffset: 0
+        };
+    }
+    return win.__SOUL_AUDIO_MEMORY__;
+};
 
-  private masterGain: GainNode | null = null;
-  private masterAnalyser: AnalyserNode | null = null;
-  private trackNodes = new Map<string, { volume: number, pan: number }>();
-  private activeBlocks = new Map<string, ActiveBlockGroup>();
-  private scheduledBlockIds = new Set<string>();
-  private noiseBuffer: AudioBuffer | null = null;
-  private audioCache = new Map<string, AudioBuffer>();
-  
-  private wasmModule: WebAssembly.Module | null = null;
-  private isWasmLoaded = false;
-  private wasmBinauralNode: AudioWorkletNode | null = null;
-  
-  private schedulerTimer: ReturnType<typeof setInterval> | null = null;
+export class AudioEngine {
+  private schedulerTimer: any = null;
   private allBlocks: Block[] = [];
-  private availableVoiceIndices: number[] = Array.from({ length: 32 }, (_, i) => i);
+
+  constructor() {
+    console.log("AudioEngine: Real-time Controller Linked.");
+  }
+
+  // Helper-Getters für den globalen Speicher
+  private get mem() { return getGlobalStore(); }
+  private get ctx(): AudioContext | null { return this.mem.ctx; }
+  private set ctx(v: AudioContext | null) { this.mem.ctx = v; }
+  private get wasmNode(): AudioWorkletNode | null { return this.mem.wasmNode; }
+  private set wasmNode(v: AudioWorkletNode | null) { this.mem.wasmNode = v; }
+  
+  public get isPlaying() { return this.mem.isPlaying; }
+  public set isPlaying(v: boolean) { this.mem.isPlaying = v; }
+  public get currentOffset() { return this.mem.currentOffset; }
+  public set currentOffset(v: number) { this.mem.currentOffset = v; }
 
   private dbToGain(db: number): number {
-    if (db === -Infinity) return 0;
+    if (db <= -100) return 0;
     return Math.pow(10, db / 20);
   }
 
-  private getGainFromVolume(vol: number): number {
-    if (vol < 0) return this.dbToGain(vol);
-    return vol / 100;
-  }
-
   async init() {
-    if (this.ctx) return;
-    const AudioCtor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    this.ctx = new AudioCtor({ sampleRate: 48000 }); 
-    this.createBrownNoiseBuffer();
+    if (this.ctx && this.wasmNode) return;
 
-    if (!this.isWasmLoaded) {
-      try {
-        const response = await fetch('/worklets/soul_synth.wasm');
-        if (response.ok) {
-          const wasmBuffer = await response.arrayBuffer();
-          this.wasmModule = await WebAssembly.compile(wasmBuffer);
-          await this.ctx.audioWorklet.addModule('/worklets/SoulTuneProcessor.js');
-          this.isWasmLoaded = true;
-          console.log("AudioEngine: Wasm God-Mode initialized.");
-        }
-      } catch (err) {
-        console.error("Failed to load Wasm audio module:", err);
-      }
+    const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
+    this.ctx = new AudioCtor({ sampleRate: 48000 });
+    this.createNoiseBuffers();
+
+    try {
+        const res = await fetch('/worklets/soul_synth_v2.wasm');
+        const wasmModule = await WebAssembly.compile(await res.arrayBuffer());
+        
+        await this.ctx.audioWorklet.addModule(`/worklets/SoulTuneProcessor_v2.js?id=${Date.now()}`);
+        
+        this.wasmNode = new AudioWorkletNode(this.ctx, 'soul-tune-processor', {
+            outputChannelCount: [2],
+            processorOptions: { wasmModule }
+        });
+        
+        console.log("AudioEngine: Raw-Metal Engine Locked.");
+    } catch (e) {
+        console.error("AudioEngine: Fatal Init Error", e);
     }
   }
 
-  private createBrownNoiseBuffer() {
-    if (!this.ctx || this.noiseBuffer) return;
+  private createNoiseBuffers() {
+    if (!this.ctx || this.mem.pinkNoiseBuffer) return;
     const bufferSize = 5 * this.ctx.sampleRate;
-    this.noiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-    const output = this.noiseBuffer.getChannelData(0);
+    
+    this.mem.brownNoiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const brownOut = this.mem.brownNoiseBuffer.getChannelData(0);
     let lastOut = 0;
     for (let i = 0; i < bufferSize; i++) {
         const white = Math.random() * 2 - 1;
-        output[i] = (lastOut + (0.02 * white)) / 1.02;
-        lastOut = output[i];
-        output[i] *= 2.0;
+        brownOut[i] = (lastOut + (0.02 * white)) / 1.02;
+        lastOut = brownOut[i];
+        brownOut[i] *= 3.5;
+    }
+
+    this.mem.pinkNoiseBuffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const pinkOut = this.mem.pinkNoiseBuffer.getChannelData(0);
+    let b0, b1, b2, b3, b4, b5, b6; b0 = b1 = b2 = b3 = b4 = b5 = b6 = 0.0;
+    for (let i = 0; i < bufferSize; i++) {
+        const white = Math.random() * 2 - 1;
+        b0 = 0.99886 * b0 + white * 0.0555179; b1 = 0.99332 * b1 + white * 0.0750759;
+        b2 = 0.96900 * b2 + white * 0.1538520; b3 = 0.86650 * b3 + white * 0.3104856;
+        b4 = 0.55000 * b4 + white * 0.5329522; b5 = -0.7616 * b5 - white * 0.0168980;
+        pinkOut[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
+        b6 = white * 0.115926;
     }
   }
 
   playSequencer = async (blocks: Block[], startOffset: number = 0) => {
     await this.init();
-    if (!this.ctx) return;
-    
-    this.stop();
+    if (!this.ctx || !this.wasmNode) return;
+
+    if (this.isPlaying) this.stop();
 
     this.allBlocks = blocks;
     this.currentOffset = startOffset;
-    
     if (this.ctx.state === 'suspended') await this.ctx.resume();
-    this.baseTime = this.ctx.currentTime;
+    this.mem.baseTime = this.ctx.currentTime;
     this.isPlaying = true;
 
-    this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.value = 0.7;
-    this.masterAnalyser = this.ctx.createAnalyser();
-    this.masterAnalyser.fftSize = 2048;
-    this.masterGain.connect(this.masterAnalyser);
-    this.masterAnalyser.connect(this.ctx.destination);
+    this.mem.masterGain = this.ctx.createGain();
+    this.mem.masterGain.gain.value = 0.7;
+    this.mem.masterAnalyser = this.ctx.createAnalyser();
+    this.mem.masterAnalyser.fftSize = 2048;
+    this.mem.masterGain.connect(this.mem.masterAnalyser);
+    this.mem.masterAnalyser.connect(this.ctx.destination);
 
-    // CRITICAL: Single Wasm Node for everything
-    if (this.isWasmLoaded && this.wasmModule) {
-        this.wasmBinauralNode = new AudioWorkletNode(this.ctx, 'soul-tune-processor', {
-            outputChannelCount: [2],
-            processorOptions: { wasmModule: this.wasmModule }
-        });
-        this.wasmBinauralNode.connect(this.masterGain);
-    }
+    this.wasmNode.disconnect();
+    this.wasmNode.connect(this.mem.masterGain);
+    this.wasmNode.port.postMessage({ type: 'RESET' });
 
-    this.trackNodes.clear();
-    const { tracks } = useStudioStore.getState();
-    tracks.forEach(track => {
-        this.trackNodes.set(track.id, { 
-            volume: track.volume ?? 1.0, 
-            pan: track.pan ?? 0.0 
-        });
-    });
-
-    const urlsToLoad = blocks
-       .filter(b => b.type === 'voice' || b.type === 'guide')
-       .map(b => b.properties.fileUrl as string)
-       .filter(url => url && !this.audioCache.has(url));
-
-    if (urlsToLoad.length > 0) {
-       await Promise.all(urlsToLoad.map(async (url) => {
-          try {
-             const res = await fetch(url);
-             if (!res.ok) return;
-             const arr = await res.arrayBuffer();
-             const buf = await this.ctx!.decodeAudioData(arr);
-             this.audioCache.set(url, buf);
-          } catch { /* ignore */ }
-       }));
-    }
-
-    this.runScheduler();
     this.schedulerTimer = setInterval(this.runScheduler, 100);
   };
 
   private runScheduler = () => {
     if (!this.isPlaying || !this.ctx) return;
-    const lookahead = 0.5;
-    const now = this.ctx.currentTime;
-    const currentDAWTime = now - this.baseTime + this.currentOffset;
+    const dawTime = this.ctx.currentTime - this.mem.baseTime + this.currentOffset;
 
-    this.allBlocks.forEach(block => {
-      if (block.start_time <= currentDAWTime + lookahead && block.end_time > currentDAWTime && !this.scheduledBlockIds.has(block.id)) {
-        this.scheduleBlock(block);
+    this.allBlocks.forEach(b => {
+      if (b.start_time <= dawTime + 0.5 && b.end_time > dawTime && !this.mem.scheduledIds.has(b.id)) {
+        this.scheduleBlock(b);
       }
     });
 
-    this.activeBlocks.forEach((group, id) => {
-        if (currentDAWTime > group.endTime) {
-            this.cleanupBlock(id);
-        }
+    this.mem.activeBlocks.forEach((group: ActiveBlockGroup, id: string) => {
+        if (dawTime > group.endTime) this.cleanupBlock(id);
     });
   };
 
-  private scheduleBlock(block: Block) {
-    if (!this.ctx || !this.masterGain) return;
+  private scheduleBlock(b: Block) {
+    if (!this.ctx || !this.mem.masterGain) return;
     
-    const track = this.trackNodes.get(block.track_id);
-    const nodeStart = Math.max(this.ctx.currentTime, this.baseTime + block.start_time - this.currentOffset);
-    const endTimeCtx = this.baseTime + block.end_time - this.currentOffset;
-    const fadeIn = (block.properties.fade_in as number) || 0;
-    const fadeOut = (block.properties.fade_out as number) || 0;
+    const track = useStudioStore.getState().tracks.find(t => t.id === b.track_id);
+    const soloActive = useStudioStore.getState().tracks.some(t => t.isSolo);
+    const isMuted = track?.isMuted || (soloActive && !track?.isSolo);
+    const trackVol = isMuted ? 0 : (track?.volume ?? 1.0);
+    const trackPan = track?.pan ?? 0.0;
 
-    if (block.type === 'atmosphere') {
-       const noiseSource = this.ctx.createBufferSource();
-       noiseSource.buffer = this.noiseBuffer;
-       noiseSource.loop = true;
-       const filter = this.ctx.createBiquadFilter();
-       filter.type = 'lowpass';
-       filter.frequency.value = (block.properties.filterCutoff as number) ?? 600;
-       const gain = this.ctx.createGain();
-       const targetVol = this.getGainFromVolume(block.properties.volume ?? 50) * 0.4 * (track?.volume ?? 1.0);
-       gain.gain.setValueAtTime(0, Math.max(0, nodeStart - 0.01));
-       if (fadeIn > 0) gain.gain.linearRampToValueAtTime(targetVol, nodeStart + fadeIn);
-       else gain.gain.setTargetAtTime(targetVol, nodeStart, 0.05);
-       noiseSource.connect(filter);
-       filter.connect(gain);
-       gain.connect(this.masterGain);
-       if (fadeOut > 0) {
-           gain.gain.setValueAtTime(targetVol, Math.max(nodeStart, endTimeCtx - fadeOut));
-           gain.gain.linearRampToValueAtTime(0, endTimeCtx);
-       } else gain.gain.setTargetAtTime(0, Math.max(0, endTimeCtx - 0.02), 0.01);
-       noiseSource.start(nodeStart);
-       noiseSource.stop(endTimeCtx);
-       this.activeBlocks.set(block.id, { type: 'atmosphere', source: noiseSource, gain, startTime: block.start_time, endTime: block.end_time });
+    const nodeStart = Math.max(this.ctx.currentTime, this.mem.baseTime + b.start_time - this.currentOffset);
+    const endTimeCtx = this.mem.baseTime + b.end_time - this.currentOffset;
+
+    if (b.type === 'carrier' || b.type === 'entrainment') {
+        if (this.wasmNode && this.mem.voices.length > 0) {
+            const vIdx = this.mem.voices.shift()!;
+            const rawVol = b.properties.volume !== undefined ? Number(b.properties.volume) : -12;
+            const vol = (rawVol < 0) ? this.dbToGain(rawVol) : (rawVol / 100);
+            const typeMult = (b.type === 'carrier' ? 0.6 : 1.0);
+            
+            this.wasmNode.port.postMessage({
+                type: 'SET_VOICE',
+                index: vIdx,
+                carrier: Number(b.properties.baseFrequency) || 100,
+                beat: Number(b.properties.targetStateHz) || 0,
+                volume: vol * typeMult * trackVol,
+                harmonizer: (Number(b.properties.harmonizerLevel) || 0) / 100,
+                pan: trackPan
+            });
+            
+            this.mem.activeBlocks.set(b.id, { type: b.type, voiceIndex: vIdx, endTime: b.end_time });
+        }
+    } else if (b.type === 'atmosphere') {
+        const source = this.ctx.createBufferSource();
+        const type = b.properties.atmosphereType ?? 'pinkNoise';
+        source.buffer = type === 'brownNoise' ? this.mem.brownNoiseBuffer : this.mem.pinkNoiseBuffer;
+        source.loop = true;
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = Number(b.properties.filterCutoff) || 600;
+        const gain = this.ctx.createGain();
+        const rawVol = b.properties.volume !== undefined ? Number(b.properties.volume) : -24;
+        const vol = (rawVol < 0) ? this.dbToGain(rawVol) : (rawVol / 100);
+        
+        gain.gain.setValueAtTime(0, nodeStart);
+        gain.gain.setTargetAtTime(vol * 0.4 * trackVol, nodeStart, 0.1);
+        
+        source.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.mem.masterGain);
+        
+        source.start(nodeStart);
+        source.stop(endTimeCtx);
+        this.mem.activeBlocks.set(b.id, { type: 'atmosphere', source, gain, filter, endTime: b.end_time });
+    } else if (b.type === 'voice' || b.type === 'guide') {
+        const url = b.properties.fileUrl as string;
+        if (url && this.mem.audioCache.has(url)) {
+            const source = this.ctx.createBufferSource();
+            source.buffer = this.mem.audioCache.get(url)!;
+            const gain = this.ctx.createGain();
+            const rawVol = b.properties.volume !== undefined ? Number(b.properties.volume) : -3;
+            const vol = (rawVol < 0) ? this.dbToGain(rawVol) : (rawVol / 100);
+            const sub = !!b.properties.subliminal;
+            
+            gain.gain.setValueAtTime(0, nodeStart);
+            gain.gain.setTargetAtTime(vol * (sub ? 0.1 : 1.0) * trackVol, nodeStart, 0.1);
+            
+            source.connect(gain);
+            gain.connect(this.mem.masterGain);
+            
+            const offset = Math.max(0, this.currentOffset - b.start_time);
+            source.start(nodeStart, offset);
+            source.stop(endTimeCtx);
+            this.mem.activeBlocks.set(b.id, { type: b.type, source, gain, endTime: b.end_time });
+        }
     }
-    else if (block.type === 'carrier' || block.type === 'entrainment') {
-       const baseFreq = (block.properties.baseFrequency as number) ?? 100.0;
-       const targetHz = (block.properties.targetStateHz as number) || 0;
-       const harmonizerLevel = (block.properties.harmonizerLevel as number) ?? 0;
-       const levelFraction = harmonizerLevel / 100;
-       const blockVol = this.getGainFromVolume(block.properties.volume ?? 50) * (block.type === 'carrier' ? 0.6 : 1.0);
-       const trackVol = track?.volume ?? 1.0;
-       const trackPan = track?.pan ?? 0.0;
-       
-       if (this.wasmBinauralNode && this.availableVoiceIndices.length > 0) {
-           const vIdx = this.availableVoiceIndices.shift()!;
-           this.wasmBinauralNode.port.postMessage({
-               type: 'SET_VOICE',
-               index: vIdx,
-               carrier: baseFreq,
-               beat: targetHz,
-               volume: blockVol * trackVol,
-               harmonizer: levelFraction,
-               pan: trackPan
-           });
-           this.activeBlocks.set(block.id, { type: block.type, voiceIndex: vIdx, startTime: block.start_time, endTime: block.end_time });
-       }
-    }
-    else if (block.type === 'voice' || block.type === 'guide') {
-       const fileUrl = block.properties.fileUrl as string;
-       if (!this.audioCache.has(fileUrl)) return;
-       const source = this.ctx.createBufferSource();
-       source.buffer = this.audioCache.get(fileUrl)!;
-       const gain = this.ctx.createGain();
-       const subMode = block.properties.subliminal ?? false;
-       const targetVol = this.getGainFromVolume(block.properties.volume ?? 80) * (subMode ? 0.1 : 1.0) * (track?.volume ?? 1.0);
-       gain.gain.setValueAtTime(0, Math.max(0, nodeStart - 0.01));
-       if (fadeIn > 0) gain.gain.linearRampToValueAtTime(targetVol, nodeStart + fadeIn);
-       else gain.gain.setTargetAtTime(targetVol, nodeStart, 0.05);
-       source.connect(gain);
-       gain.connect(this.masterGain);
-       if (fadeOut > 0) {
-           gain.gain.setValueAtTime(targetVol, Math.max(nodeStart, endTimeCtx - fadeOut));
-           gain.gain.linearRampToValueAtTime(0, endTimeCtx);
-       } else gain.gain.setTargetAtTime(0, Math.max(0, endTimeCtx - 0.05), 0.01);
-       const trimStart = (block.properties.trimStart as number) || 0;
-       const bufferOffset = Math.max(0, this.currentOffset - block.start_time) + trimStart;
-       source.start(nodeStart, bufferOffset); 
-       source.stop(endTimeCtx); 
-       this.activeBlocks.set(block.id, { type: 'voice', gain, source, startTime: block.start_time, endTime: block.end_time });
-    }
-    this.scheduledBlockIds.add(block.id);
+    this.mem.scheduledIds.add(b.id);
   }
 
   private cleanupBlock(id: string) {
-    const group = this.activeBlocks.get(id);
+    const group = this.mem.activeBlocks.get(id);
     if (!group) return;
     try {
-        if (group.voiceIndex !== undefined && this.wasmBinauralNode) {
-            this.wasmBinauralNode.port.postMessage({ type: 'STOP_VOICE', index: group.voiceIndex });
-            this.availableVoiceIndices.push(group.voiceIndex);
+        if (group.voiceIndex !== undefined && this.wasmNode) {
+            this.wasmNode.port.postMessage({ type: 'STOP_VOICE', index: group.voiceIndex });
+            this.mem.voices.push(group.voiceIndex);
         }
-        if (group.source) group.source.stop();
+        if (group.source) {
+            try { group.source.stop(); } catch(e) {}
+            group.source.disconnect();
+        }
         if (group.gain) group.gain.disconnect();
+        if (group.filter) group.filter.disconnect();
     } catch { /* ignore */ }
-    this.activeBlocks.delete(id);
+    this.mem.activeBlocks.delete(id);
   }
 
   updateBlockProperties = (blocks: Block[], tracks: Track[]) => {
      if (!this.isPlaying || !this.ctx) return;
-     const now = this.ctx.currentTime;
      this.allBlocks = blocks;
      
-     tracks.forEach(track => {
-        this.trackNodes.set(track.id, { 
-            volume: track.volume ?? 1.0, 
-            pan: track.pan ?? 0.0 
-        });
+     const soloActive = tracks.some(t => t.isSolo);
+
+     this.mem.activeBlocks.forEach((group: ActiveBlockGroup, blockId: string) => {
+        const b = blocks.find(x => x.id === blockId);
+        if (!b) return;
+        
+        const track = tracks.find(t => t.id === b.track_id);
+        const isMuted = track?.isMuted || (soloActive && !track?.isSolo);
+        const trackVol = isMuted ? 0 : (track?.volume ?? 1.0);
+        const trackPan = track?.pan ?? 0.0;
+
+        const rawVol = b.properties.volume !== undefined ? Number(b.properties.volume) : -12;
+        const vol = (rawVol < 0) ? this.dbToGain(rawVol) : (rawVol / 100);
+
+        if ((group.type === 'carrier' || group.type === 'entrainment') && group.voiceIndex !== undefined) {
+            const typeMult = (b.type === 'carrier' ? 0.6 : 1.0);
+            this.wasmNode?.port.postMessage({ 
+                type: 'SET_VOICE', 
+                index: group.voiceIndex,
+                carrier: Number(b.properties.baseFrequency) || 100, 
+                beat: Number(b.properties.targetStateHz) || 0, 
+                volume: vol * typeMult * trackVol,
+                harmonizer: (Number(b.properties.harmonizerLevel) || 0) / 100,
+                pan: trackPan
+            });
+        } else if (group.type === 'atmosphere' && group.gain) {
+            group.gain.gain.setTargetAtTime(vol * 0.4 * trackVol, this.ctx!.currentTime, 0.05);
+            if (group.filter) group.filter.frequency.setTargetAtTime(Number(b.properties.filterCutoff) || 600, this.ctx!.currentTime, 0.05);
+        } else if ((group.type === 'voice' || group.type === 'guide') && group.gain) {
+            const sub = !!b.properties.subliminal;
+            group.gain.gain.setTargetAtTime(vol * (sub ? 0.1 : 1.0) * trackVol, this.ctx!.currentTime, 0.05);
+        }
      });
-
-     blocks.forEach(block => {
-        const group = this.activeBlocks.get(block.id);
-        if (!group) return;
-        const vol = this.getGainFromVolume(block.properties.volume ?? 50);
-        const track = this.trackNodes.get(block.track_id);
-
-        if ((group.type === 'carrier' || group.type === 'entrainment') && group.voiceIndex !== undefined && this.wasmBinauralNode) {
-           const baseFreq = (block.properties.baseFrequency as number) ?? 100.0;
-           const targetHz = (block.properties.targetStateHz as number) || 0;
-           this.wasmBinauralNode.port.postMessage({ 
-               type: 'SET_VOICE', 
-               index: group.voiceIndex,
-               carrier: baseFreq, 
-               beat: targetHz, 
-               volume: vol * (group.type === 'carrier' ? 0.6 : 1.0) * (track?.volume ?? 1.0), 
-               harmonizer: (block.properties.harmonizerLevel as number ?? 0) / 100,
-               pan: track?.pan ?? 0.0
-           });
-        }
-        else if (group.type === 'atmosphere' && group.gain) {
-           group.gain.gain.setTargetAtTime(vol * 0.4 * (track?.volume ?? 1.0), now, 0.02);
-        }
-        else if (group.type === 'voice' && group.gain) {
-           group.gain.gain.setTargetAtTime(vol * (block.properties.subliminal ? 0.1 : 1.0) * (track?.volume ?? 1.0), now, 0.02);
-        }
-     });
-  };
-
-  getCurrentTime = (): number => {
-    if (!this.isPlaying || !this.ctx) return this.currentOffset;
-    return this.ctx.currentTime - this.baseTime + this.currentOffset;
-  };
-
-  getAnalyserData = (destArray: Uint8Array) => {
-    if (this.masterAnalyser) this.masterAnalyser.getByteTimeDomainData(destArray);
   };
 
   stop = () => {
-    if (this.schedulerTimer) {
-        clearInterval(this.schedulerTimer);
-        this.schedulerTimer = null;
-    }
+    if (this.schedulerTimer) clearInterval(this.schedulerTimer);
+    this.schedulerTimer = null;
+    this.mem.activeBlocks.forEach((_: any, id: string) => this.cleanupBlock(id));
+    this.mem.activeBlocks.clear();
+    this.mem.scheduledIds.clear();
+    this.mem.voices = Array.from({ length: 32 }, (_, i) => i);
     
-    // 1. Cleanup all active sources and filters
-    this.activeBlocks.forEach((_, id) => {
-        this.cleanupBlock(id);
-    });
+    this.wasmNode?.port.postMessage({ type: 'RESET' });
+    try { this.wasmNode?.disconnect(); } catch(e) {}
+    try { this.mem.masterGain?.disconnect(); } catch(e) {}
+    try { this.mem.masterAnalyser?.disconnect(); } catch(e) {}
     
-    this.activeBlocks.clear();
-    this.scheduledBlockIds.clear(); 
-    this.availableVoiceIndices = Array.from({ length: 32 }, (_, i) => i);
-    
-    // 2. DISCONNECT AND KILL THE WASM NODE
-    if (this.wasmBinauralNode) {
-        try {
-            this.wasmBinauralNode.port.postMessage({ type: 'RESET' });
-            this.wasmBinauralNode.disconnect();
-        } catch (e) {
-            console.warn("AudioEngine: Error killing Wasm node", e);
-        }
-        this.wasmBinauralNode = null;
-    }
-
-    // 3. CLEANUP MASTER GRAPH
-    if (this.masterAnalyser) {
-        this.masterAnalyser.disconnect();
-        this.masterAnalyser = null;
-    }
-
-    if (this.masterGain) {
-        this.masterGain.disconnect();
-        this.masterGain = null;
-    }
-
+    this.mem.masterGain = null;
+    this.mem.masterAnalyser = null;
     this.isPlaying = false;
+  };
+
+  getCurrentTime = () => (this.isPlaying && this.ctx) ? this.ctx.currentTime - this.mem.baseTime + this.currentOffset : this.currentOffset;
+
+  getAnalyserData = (destArray: Uint8Array) => {
+    if (this.mem.masterAnalyser) {
+        this.mem.masterAnalyser.getByteTimeDomainData(destArray as any);
+    }
   };
 }
 

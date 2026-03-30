@@ -30,23 +30,20 @@ export default function StudioPage() {
   useEffect(() => {
     async function loadProjectAndSubscription() {
       try {
-        // Parallel fetch for project and subscription
         const [projectRes, subRes] = await Promise.all([
           supabase.from("projects").select("*").eq("id", projectId).single(),
-          supabase.from("subscriptions").select("status").single()
+          supabase.from("subscriptions").select("status").maybeSingle()
         ]);
 
         if (projectRes.error) throw projectRes.error;
         if (!projectRes.data) throw new Error("Project not found");
 
-        // Set Subscription Status (fallback to 'free')
         if (subRes.data) {
           setSubscriptionStatus(subRes.data.status as any);
         } else {
           setSubscriptionStatus('free');
         }
 
-        // Initialize store with saved state
         const state = projectRes.data.state_json || { tracks: [], blocks: [] };
         initializeProject(state);
       } catch (err: any) {
@@ -58,7 +55,8 @@ export default function StudioPage() {
     }
 
     if (projectId) loadProjectAndSubscription();
-  }, [projectId, initializeProject, setSubscriptionStatus, supabase]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, supabase]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),

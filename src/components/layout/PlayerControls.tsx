@@ -12,11 +12,14 @@ export function PlayerControls() {
   useEffect(() => {
     if (!audio) return;
     if (isPlaying) {
-      audio.playSequencer(blocks, currentTime);
+      // Only read blocks and currentTime on the exact moment play is toggled
+      const currentBlocks = useStudioStore.getState().blocks;
+      const startTime = useStudioStore.getState().currentTime;
+      audio.playSequencer(currentBlocks, startTime);
     } else {
       audio.stop();
     }
-  }, [isPlaying, blocks, currentTime]); // Wait for explicit play state change to fully sync.
+  }, [isPlaying]); // DANGEROUS: Do NOT add currentTime here! It updates 60fps and causes an OOM loop!
 
   const handlePlay = () => {
     togglePlay();

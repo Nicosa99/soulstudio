@@ -26,7 +26,7 @@ export default async function DashboardPage() {
   // Fetch projects and subscription in parallel
   const [projectsRes, subRes] = await Promise.all([
     supabase.from("projects").select("*").order("created_at", { ascending: false }),
-    supabase.from("subscriptions").select("status").eq("user_id", user.id).single()
+    supabase.from("subscriptions").select("status").eq("user_id", user.id).maybeSingle()
   ]);
 
   const projects = projectsRes.data;

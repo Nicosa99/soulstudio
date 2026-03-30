@@ -4,7 +4,6 @@ import Stripe from "stripe";
 
 export async function POST(request: Request) {
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-    // @ts-expect-error - Clover is a specific preview version
     apiVersion: "2026-02-25.clover",
   });
 
@@ -76,7 +75,7 @@ export async function POST(request: Request) {
 
     case "customer.subscription.updated":
       // Subscription changed or renewed
-      const updatedSub = event.data.object as Stripe.Subscription;
+      const updatedSub = event.data.object as any;
       await supabaseAdmin
         .from("subscriptions")
         .update({ 

@@ -5,7 +5,6 @@ import Stripe from "stripe";
 export async function POST(request: Request) {
   try {
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-      // @ts-expect-error - Clover is a specific preview version
       apiVersion: "2026-02-25.clover",
     });
 
